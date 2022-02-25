@@ -1,16 +1,16 @@
 base_config = {
-    'agent': '@spinup.algos.pytorch.TD3',
-    'total_steps': 3_000,
+    'agent': '@spinup.algos.tf2.ED2',
+    'total_steps': 3_000_0,
     'num_test_episodes': 30,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
-        # 'activation': 'relu',
-        #'prior_weight': 0.0
+        'activation': 'relu',
+        'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
-    #'save_path': './out/checkpoint',
+    'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'sunrise'
+        'exp_name': 'ed2'
     }
 }
 
@@ -28,5 +28,7 @@ params_grid = {
              # 680578, 50728, 680595, 650678, 984230,
              # 420115, 487860, 234662, 753671, 709357,
              # 755288, 109482, 626151, 459560, 629937
+
              ],
 }
+

@@ -39,38 +39,10 @@ class ReplayBuffer:
                      done=self.done_buf[idxs])
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
 
-def ed2(
-    env_fn,
-    actor_critic=core.MLPActorCriticFactory,
-    ac_kwargs=None,
-    ac_number=5,
-    total_steps=1_000_000,
-    replay_size=1_000_000,
-    init_ere_coeff=0.995,
-    gamma=0.99,
-    polyak=0.995,
-    lr=3e-4,
-    batch_size=256,
-    start_steps=10_000,
-    update_after=1_000,
-    update_every=50,
-    train_intensity=1,
-    act_noise=0.29,
-    use_noise_for_exploration=False,
-    use_vote_policy=False,
-    max_ep_len=1_000,
-    num_test_episodes=10,
-    logger_kwargs=None,
-    log_every=10_000,
-    save_freq=10_000,
-    save_path=None,
-    trace_rate=None,
-    seed=0,
-):
-    return 0
-
 def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
+         steps_per_epoch=4000,
+         total_steps=1_000_000,
+         replay_size=int(1e6), gamma=0.99,
          polyak=0.995, pi_lr=1e-3, q_lr=1e-3, batch_size=100, start_steps=10000, 
          update_after=1000, update_every=50, act_noise=0.1, num_test_episodes=10, 
          max_ep_len=1000, logger_kwargs=dict(), save_freq=1):
@@ -109,8 +81,9 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch (int): Number of steps of interaction (state-action pairs) 
             for the agent and the environment in each epoch.
 
-        epochs (int): Number of epochs to run and train agent.
-
+        ## epochs (int): Number of epochs to run and train agent.
+        total_steps (int): Number of environment interactions to run and train
+            the agent.
         replay_size (int): Maximum length of replay buffer.
 
         gamma (float): Discount factor. (Always between 0 and 1.)
@@ -267,7 +240,7 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
     # Prepare for interaction with environment
-    total_steps = steps_per_epoch * epochs
+    # total_steps = steps_per_epoch * epochs
     start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
 
@@ -315,7 +288,7 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             epoch = (t+1) // steps_per_epoch
 
             # Save model
-            if (epoch % save_freq == 0) or (epoch == epochs):
+            if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
                 logger.save_state({'env': env}, None)
 
             # Test the performance of the deterministic version of the agent.
@@ -333,23 +306,3 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.log_tabular('LossQ', average_only=True)
             logger.log_tabular('Time', time.time()-start_time)
             logger.dump_tabular()
-
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
-    parser.add_argument('--hid', type=int, default=256)
-    parser.add_argument('--l', type=int, default=2)
-    parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--seed', '-s', type=int, default=0)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--exp_name', type=str, default='ddpg')
-    args = parser.parse_args()
-
-    from spinup.utils.run_utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
-
-    ddpg(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic,
-         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
-         gamma=args.gamma, seed=args.seed, epochs=args.epochs,
-         logger_kwargs=logger_kwargs)

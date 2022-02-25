@@ -1,14 +1,14 @@
 base_config = {
-    'agent': '@spinup.algos.pytorch.TD3',
-    'total_steps': 3_000,
+    'agent': '@spinup.algos.tf2.SUNRISE',
+    'total_steps': 3000_0,
     'num_test_episodes': 30,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
-        # 'activation': 'relu',
-        #'prior_weight': 0.0
+        'activation': 'relu',
     },
-    'save_freq': 1_000_000,
-    #'save_path': './out/checkpoint',
+    'ac_number': 5,
+    'autotune_alpha': True,
+    'beta_bernoulli': 1.,
     'logger_kwargs': {
         'exp_name': 'sunrise'
     }

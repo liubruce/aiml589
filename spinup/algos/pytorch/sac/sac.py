@@ -43,7 +43,9 @@ class ReplayBuffer:
 
 
 def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-        steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
+        steps_per_epoch=4000,
+        total_steps=1_000_000,
+        replay_size=int(1e6), gamma=0.99,
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
         logger_kwargs=dict(), save_freq=1):
@@ -278,7 +280,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
     # Prepare for interaction with environment
-    total_steps = steps_per_epoch * epochs
+    # total_steps = steps_per_epoch * epochs
     start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
 
@@ -326,7 +328,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             epoch = (t+1) // steps_per_epoch
 
             # Save model
-            if (epoch % save_freq == 0) or (epoch == epochs):
+            if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
                 logger.save_state({'env': env}, None)
 
             # Test the performance of the deterministic version of the agent.

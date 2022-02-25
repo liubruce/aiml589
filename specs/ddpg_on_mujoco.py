@@ -1,7 +1,7 @@
 base_config = {
     'agent': '@spinup.algos.pytorch.DDPG',
-   # 'total_steps': 3_000,
-    'num_test_episodes': 30,
+    'total_steps': 3_000_0,
+    'num_test_episodes': 10,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',
@@ -9,6 +9,9 @@ base_config = {
     },
     'save_freq': 1_000_000,
     #'save_path': './out/checkpoint',
+    'logger_kwargs': {
+        'exp_name': 'sunrise'
+    }
 }
 
 params_grid = {

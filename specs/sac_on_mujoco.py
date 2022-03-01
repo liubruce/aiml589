@@ -16,10 +16,10 @@ base_config = {
 
 params_grid = {
     'task': [
-        'Hopper-v3',
-        # 'Walker2d-v2',
-        # 'Ant-v2',
-        # 'Humanoid-v2',
+        # 'Hopper-v3',
+        'Walker2d-v3',
+        'Ant-v3',
+        'Humanoid-v3',
     ],
     'seed': [42,
              # 7, 224444444, 11, 14,

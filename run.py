@@ -29,7 +29,6 @@ def parse_pyobject_configs(config):
             if value[0] == '@':
                 module_name, obj_name = value[1:].rsplit('.', 1)
                 module = importlib.import_module(module_name)
-                print('module, obj_name:', module, obj_name, key, value )
                 parsed_config[key] = getattr(module, obj_name)
         except (TypeError, KeyError):
             pass  # Value is not a string.

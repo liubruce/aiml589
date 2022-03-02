@@ -12,7 +12,7 @@ def train_fn(env_name="coinrun",
     # 'shared' = shared policy and value networks
     # 'dual' = separate policy and value networks
     # 'detach' = shared policy and value networks, but with the value function gradient detached during the policy phase to avoid interference
-    interacts_total=100_000_000,
+    total_steps=100_000_000,
     num_envs=64,
     n_epoch_pi=1,
     n_epoch_vf=1,
@@ -56,7 +56,7 @@ def train_fn(env_name="coinrun",
     ppg.learn(
         venv=venv,
         model=model,
-        interacts_total=interacts_total,
+        interacts_total=total_steps,
         ppo_hps=dict(
             lr=lr,
             γ=gamma,

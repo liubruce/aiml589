@@ -5,3 +5,5 @@ scikit-learn==1.0.2
 torch==1.10.2
 tensorflow==2.8.0
 tensorflow-probability==0.16.0
+gym3==0.3.3
+procgen==0.10.4

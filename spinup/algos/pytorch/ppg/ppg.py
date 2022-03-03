@@ -11,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.distributions import Categorical
 import torch.nn.functional as F
+import spinup.algos.pytorch.ppg.core as core
 
 import gym
 
@@ -58,46 +59,6 @@ def init_(m):
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 
-# networks
-
-# class Actor(nn.Module):
-#     def __init__(self, state_dim, hidden_dim, num_actions):
-#         super().__init__()
-#         self.net = nn.Sequential(
-#             nn.Linear(state_dim, hidden_dim),
-#             nn.Tanh(),
-#             nn.Linear(hidden_dim, hidden_dim),
-#             nn.Tanh(),
-#             nn.Linear(hidden_dim, hidden_dim),
-#             nn.Tanh()
-#         )
-#
-#         self.action_head = nn.Sequential(
-#             nn.Linear(hidden_dim, num_actions),
-#             nn.Softmax(dim=-1)
-#         )
-#
-#         self.value_head = nn.Linear(hidden_dim, 1)
-#         self.apply(init_)
-#
-#     def forward(self, x):
-#         hidden = self.net(x)
-#         return self.action_head(hidden), self.value_head(hidden)
-#
-# class Critic(nn.Module):
-#     def __init__(self, state_dim, hidden_dim):
-#         super().__init__()
-#         self.net = nn.Sequential(
-#             nn.Linear(state_dim, hidden_dim),
-#             nn.Tanh(),
-#             nn.Linear(hidden_dim, hidden_dim),
-#             nn.Tanh(),
-#             nn.Linear(hidden_dim, 1),
-#         )
-#         self.apply(init_)
-#
-#     def forward(self, x):
-#         return self.net(x)
 
 # agent
 
@@ -110,10 +71,10 @@ def clipped_value_loss(values, rewards, old_values, clip):
 class PPG:
     def __init__(
         self,
-        state_dim,
-        num_actions,
-        actor_hidden_dim,
-        critic_hidden_dim,
+        observation_space,
+        action_space,
+        actor_hidden_sizes,
+        critic_hidden_sizes,
         epochs,
         epochs_aux,
         minibatch_size,
@@ -125,8 +86,10 @@ class PPG:
         eps_clip,
         value_clip
     ):
-        self.actor = Actor(state_dim, actor_hidden_dim, num_actions).to(device)
-        self.critic = Critic(state_dim, critic_hidden_dim).to(device)
+        # actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+        self.actor = core.MLPActor(observation_space, action_space,actor_hidden_sizes).to(device)
+        obs_dim = observation_space.shape[0]
+        self.critic = core.MLPCritic(obs_dim, critic_hidden_sizes).to(device)
         self.opt_actor = Adam(self.actor.parameters(), lr=lr, betas=betas)
         self.opt_critic = Adam(self.critic.parameters(), lr=lr, betas=betas)
 
@@ -174,7 +137,8 @@ class PPG:
             values.append(mem.value)
 
         # calculate generalized advantage estimate
-        next_state = torch.from_numpy(next_state).to(device)
+        # next_state = torch.from_numpy(next_state).to(device)
+        next_state = torch.as_tensor(next_state, dtype=torch.float32)
         next_value = self.critic(next_state).detach()
         values = values + [next_value]
 
@@ -272,8 +236,8 @@ def main(
     env_fn,#env_name = 'LunarLander-v2',
     num_episodes = 50000,
     max_timesteps = 500,
-    actor_hidden_dim = 32,
-    critic_hidden_dim = 256,
+    actor_hidden_dim = (32,32),
+    critic_hidden_dim = (64,64),
     minibatch_size = 64,
     lr = 0.0005,
     betas = (0.9, 0.999),
@@ -295,19 +259,19 @@ def main(
 ):
     # print('env_name is ', env_name)
     env = env_fn()
+    #
+    # if monitor:
+    #     env = gym.wrappers.Monitor(env, './tmp/', force=True)
 
-    if monitor:
-        env = gym.wrappers.Monitor(env, './tmp/', force=True)
-
-    state_dim = env.observation_space.shape[0]
-    num_actions = env.action_space.n
+    # state_dim = env.observation_space.shape[0]
+    # num_actions = env.action_space.n
 
     memories = deque([])
     aux_memories = deque([])
 
     agent = PPG(
-        state_dim,
-        num_actions,
+        env.observation_space,
+        env.action_space,
         actor_hidden_dim,
         critic_hidden_dim,
         epochs,
@@ -342,14 +306,16 @@ def main(
             if updated and render_eps:
                 env.render()
 
-            state = torch.from_numpy(state).to(device)
-            action_probs, _ = agent.actor(state)
+            state = torch.as_tensor(state, dtype=torch.float32)
+            # torch.from_numpy(state).to(device)
+            action_probs, action_log_prob = agent.actor(state)
             value = agent.critic(state)
 
-            dist = Categorical(action_probs)
-            action = dist.sample()
-            action_log_prob = dist.log_prob(action)
-            action = action.item()
+            # dist = action_probs
+            # Categorical(action_probs)
+            action = action_probs
+            # action_log_prob = dist.log_prob(action)
+            # action = action.item()
 
             next_state, reward, done, _ = env.step(action)
 
@@ -379,6 +345,6 @@ def main(
 
         if eps % save_every == 0:
             agent.save()
-
-if __name__ == '__main__':
-    main()
+#
+# if __name__ == '__main__':
+#     main()

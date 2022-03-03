@@ -96,7 +96,7 @@ class MLPGaussianActor(Actor):
 
 class MLPCritic(nn.Module):
 
-    def __init__(self, obs_dim, hidden_sizes, activation):
+    def __init__(self, obs_dim, hidden_sizes=(64,64), activation=nn.Tanh):
         super().__init__()
         self.v_net = mlp([obs_dim] + list(hidden_sizes) + [1], activation)
 
@@ -151,7 +151,7 @@ class MLPActor(nn.Module):
 
         # build value function
 
-    def step(self, obs):
+    def forward(self, obs):
         with torch.no_grad():
             pi = self.pi._distribution(obs)
             a = pi.sample()

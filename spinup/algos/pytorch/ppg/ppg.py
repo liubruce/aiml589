@@ -2,8 +2,6 @@
 
 import os
 from collections import deque, namedtuple
-
-from tqdm import tqdm
 import numpy as np
 import torch
 from torch import nn
@@ -155,7 +153,7 @@ class PPG:
         states = to_torch_tensor(states)
         actions = to_torch_tensor(actions)
         old_values = to_torch_tensor(values[:-1])
-        old_log_probs = to_torch_tensor(old_log_probs)
+        # old_log_probs = to_torch_tensor(old_log_probs)
 
         rewards = torch.tensor(returns).float().to(device)
 
@@ -169,14 +167,14 @@ class PPG:
         # policy phase training, similar to original PPO
         for _ in range(self.epochs):
             for states, actions, old_log_probs, rewards, old_values in dl:
-                action_probs, _ = self.actor(states)
+                action_probs, action_log_probs, entropy = self.actor(states)
                 values = self.critic(states)
-                dist = Categorical(action_probs)
-                action_log_probs = dist.log_prob(actions)
-                entropy = dist.entropy()
+                # dist = Categorical(action_probs)
+                # action_log_probs = dist.log_prob(actions)
+                # entropy = action_probs.entropy()
 
                 # calculate clipped surrogate objective, classic PPO loss
-                ratios = (action_log_probs - old_log_probs).exp()
+                ratios = (action_log_probs - old_log_probs.numpy()).exp()
                 advantages = normalize(rewards - old_values.detach())
                 surr1 = ratios * advantages
                 surr2 = ratios.clamp(1 - self.eps_clip, 1 + self.eps_clip) * advantages
@@ -213,7 +211,7 @@ class PPG:
         # the proposed auxiliary phase training
         # where the value is distilled into the policy network, while making sure the policy network does not change the action predictions (kl div loss)
         for epoch in range(self.epochs_aux):
-            for states, old_action_probs, rewards, old_values in tqdm(dl, desc=f'auxiliary epoch {epoch}'):
+            for states, old_action_probs, rewards, old_values in dl:
                 action_probs, policy_values = self.actor(states)
                 action_logprobs = action_probs.log()
 
@@ -297,7 +295,7 @@ def main(
     updated = False
     num_policy_updates = 0
 
-    for eps in tqdm(range(num_episodes), desc='episodes'):
+    for eps in range(num_episodes):
         render_eps = render and eps % render_every_eps == 0
         state = env.reset()
         for timestep in range(max_timesteps):
@@ -308,7 +306,7 @@ def main(
 
             state = torch.as_tensor(state, dtype=torch.float32)
             # torch.from_numpy(state).to(device)
-            action_probs, action_log_prob = agent.actor(state)
+            action_probs, action_log_prob, _ = agent.actor(state)
             value = agent.critic(state)
 
             # dist = action_probs

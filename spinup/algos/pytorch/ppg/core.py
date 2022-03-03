@@ -134,35 +134,6 @@ class MLPActorCritic(nn.Module):
     def act(self, obs):
         return self.step(obs)[0]
 
-class MLPActor(nn.Module):
-
-
-    def __init__(self, observation_space, action_space,
-                 hidden_sizes=(64,64), activation=nn.Tanh):
-        super().__init__()
-
-        obs_dim = observation_space.shape[0]
-
-        # policy builder depends on action space
-        if isinstance(action_space, Box):
-            self.pi = MLPGaussianActor(obs_dim, action_space.shape[0], hidden_sizes, activation)
-        elif isinstance(action_space, Discrete):
-            self.pi = MLPCategoricalActor(obs_dim, action_space.n, hidden_sizes, activation)
-
-        # build value function
-
-    def forward(self, obs):
-        with torch.no_grad():
-            pi = self.pi._distribution(obs)
-            # entropy = pi.entropy()
-            # a = pi.sample()
-            # logp_a = self.pi._log_prob_from_distribution(pi, a)
-        return pi
-        # a.numpy(), logp_a.numpy(), entropy
-
-    def act(self, obs):
-        return self.step(obs)[0]
-
 
 def init_(m):
     if isinstance(m, nn.Linear):
@@ -172,29 +143,87 @@ def init_(m):
             torch.nn.init.zeros_(m.bias)
 
 
+def get_act_dim(action_space, is_discrete):
+    if is_discrete:
+        return action_space.n
+    else:
+        return action_space.shape[0]
+
+
+
 class PPG_Actor(nn.Module):
-    def __init__(self, state_dim, hidden_dim, num_actions):
+    def __init__(self, observation_space, action_space,
+                 hidden_dim=64, activation=nn.Tanh):
         super().__init__()
+        self.action_space = action_space
+        state_dim = observation_space.shape[0]
+        self.is_discrete = True
+        if isinstance(self.action_space, Box):
+            self.is_discrete = False
+        act_dim = get_act_dim(action_space, self.is_discrete)
         self.net = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
-            nn.Tanh(),
+            activation(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            activation(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh()
+            activation()
         )
+        # self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
+        self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
+        self.value_head = nn.Linear(hidden_dim, 1)
 
         self.action_head = nn.Sequential(
-            nn.Linear(hidden_dim, num_actions),
-            nn.Softmax(dim=-1)
+            nn.Linear(hidden_dim, act_dim),
+            nn.Identity()
         )
 
-        self.value_head = nn.Linear(hidden_dim, 1)
         self.apply(init_)
 
-    def forward(self, x):
-        hidden = self.net(x)
-        return self.action_head(hidden), self.value_head(hidden)
+    def _distribution(self, mu):
+        # mu = self.net(obs)
+        if self.is_discrete:
+            return Categorical(logits=mu)
+        else:
+            std = torch.exp(self.log_std)
+            return Normal(mu, std)
+
+    def _log_prob_from_distribution(self, pi, act):
+        if self.is_discrete:
+            return pi.log_prob(act)
+        else:
+            return pi.log_prob(act).sum(axis=-1)  # Last axis sum needed for Torch Normal distribution
+
+
+    def step(self, obs):
+        with torch.no_grad():
+            hidden = self.net(obs)
+            mu = self.action_head(hidden)
+            pi = self._distribution(mu)
+            a = pi.sample()
+            logp_a = self._log_prob_from_distribution(pi, a)
+            v = self.v(obs)
+        return a.numpy(), v.numpy(), logp_a.numpy()
+
+    def act(self, obs):
+        return self.step(obs)[0]
+
+    # def forward(self, x):
+    #     hidden = self.net(x)
+    #     return self.action_head(hidden), self.value_head(hidden)
+
+    def forward(self, obs, act=None):
+        # Produce action distributions for given observations, and
+        # optionally compute the log likelihood of given actions under
+        # those distributions.
+        hidden = self.net(obs)
+        mu = self.action_head(hidden)
+        pi = self._distribution(mu)
+        logp_a = None
+        if act is not None:
+            logp_a = self._log_prob_from_distribution(pi, act)
+        return pi, logp_a, self.value_head(hidden)
 
 
 class PPG_Critic(nn.Module):

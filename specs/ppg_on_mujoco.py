@@ -1,6 +1,6 @@
 base_config = {
     'agent': '@spinup.algos.pytorch.PPG',
-    'total_steps': 3_000_0,
+    # 'total_steps': 3_000_0,
     # 'num_test_episodes': 30,
     # 'ac_kwargs': {
     #     'hidden_sizes': [256, 256],

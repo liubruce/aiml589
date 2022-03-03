@@ -1,276 +1,384 @@
-from copy import deepcopy
-from . import ppo
-from . import logger
-import torch as th
-import itertools
-from . import torch_util as tu
-from torch import distributions as td
-from .distr_builder import distr_builder
-from mpi4py import MPI
-from .tree_util import tree_map, tree_reduce
-import operator
+# https://github.com/lucidrains/phasic-policy-gradient
 
-def sum_nonbatch(logprob_tree):
-    """
-    sums over nonbatch dimensions and over all leaves of the tree
-    use with nested action spaces, which require Product distributions
-    """
-    return tree_reduce(operator.add, tree_map(tu.sum_nonbatch, logprob_tree))
+import os
+from collections import deque, namedtuple
 
+from tqdm import tqdm
+import numpy as np
+import torch
+from torch import nn
+from torch.utils.data import Dataset, DataLoader
+from torch.optim import Adam
+from torch.distributions import Categorical
+import torch.nn.functional as F
 
-class PpoModel(th.nn.Module):
-    def forward(self, ob, first, state_in) -> "pd, vpred, aux, state_out":
-        raise NotImplementedError
+import gym
 
-    @tu.no_grad
-    def act(self, ob, first, state_in):
-        pd, vpred, _, state_out = self(
-            ob=tree_map(lambda x: x[:, None], ob),
-            first=first[:, None],
-            state_in=state_in,
-        )
-        ac = pd.sample()
-        logp = sum_nonbatch(pd.log_prob(ac))
-        return (
-            tree_map(lambda x: x[:, 0], ac),
-            state_out,
-            dict(vpred=vpred[:, 0], logp=logp[:, 0]),
-        )
+# constants
 
-    @tu.no_grad
-    def v(self, ob, first, state_in):
-        _pd, vpred, _, _state_out = self(
-            ob=tree_map(lambda x: x[:, None], ob),
-            first=first[:, None],
-            state_in=state_in,
-        )
-        return vpred[:, 0]
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class PhasicModel(PpoModel):
-    def forward(self, ob, first, state_in) -> "pd, vpred, aux, state_out":
-        raise NotImplementedError
+# data
 
-    def compute_aux_loss(self, aux, mb):
-        raise NotImplementedError
+Memory = namedtuple('Memory', ['state', 'action', 'action_log_prob', 'reward', 'done', 'value'])
+AuxMemory = namedtuple('Memory', ['state', 'target_value', 'old_values'])
 
-    def initial_state(self, batchsize):
-        raise NotImplementedError
+class ExperienceDataset(Dataset):
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
 
-    def aux_keys(self) -> "list of keys needed in mb dict for compute_aux_loss":
-        raise NotImplementedError
+    def __len__(self):
+        return len(self.data[0])
 
-    def set_aux_phase(self, is_aux_phase: bool):
-        "sometimes you want to modify the model, e.g. add a stop gradient"
+    def __getitem__(self, ind):
+        return tuple(map(lambda t: t[ind], self.data))
 
+def create_shuffled_dataloader(data, batch_size):
+    ds = ExperienceDataset(data)
+    return DataLoader(ds, batch_size = batch_size, shuffle = True)
 
-class PhasicValueModel(PhasicModel):
+# helpers
+
+def exists(val):
+    return val is not None
+
+def normalize(t, eps = 1e-5):
+    return (t - t.mean()) / (t.std() + eps)
+
+def update_network_(loss, optimizer):
+    optimizer.zero_grad()
+    loss.mean().backward()
+    optimizer.step()
+
+def init_(m):
+    if isinstance(m, nn.Linear):
+        gain = torch.nn.init.calculate_gain('tanh')
+        torch.nn.init.orthogonal_(m.weight, gain)
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+
+# networks
+
+# class Actor(nn.Module):
+#     def __init__(self, state_dim, hidden_dim, num_actions):
+#         super().__init__()
+#         self.net = nn.Sequential(
+#             nn.Linear(state_dim, hidden_dim),
+#             nn.Tanh(),
+#             nn.Linear(hidden_dim, hidden_dim),
+#             nn.Tanh(),
+#             nn.Linear(hidden_dim, hidden_dim),
+#             nn.Tanh()
+#         )
+#
+#         self.action_head = nn.Sequential(
+#             nn.Linear(hidden_dim, num_actions),
+#             nn.Softmax(dim=-1)
+#         )
+#
+#         self.value_head = nn.Linear(hidden_dim, 1)
+#         self.apply(init_)
+#
+#     def forward(self, x):
+#         hidden = self.net(x)
+#         return self.action_head(hidden), self.value_head(hidden)
+#
+# class Critic(nn.Module):
+#     def __init__(self, state_dim, hidden_dim):
+#         super().__init__()
+#         self.net = nn.Sequential(
+#             nn.Linear(state_dim, hidden_dim),
+#             nn.Tanh(),
+#             nn.Linear(hidden_dim, hidden_dim),
+#             nn.Tanh(),
+#             nn.Linear(hidden_dim, 1),
+#         )
+#         self.apply(init_)
+#
+#     def forward(self, x):
+#         return self.net(x)
+
+# agent
+
+def clipped_value_loss(values, rewards, old_values, clip):
+    value_clipped = old_values + (values - old_values).clamp(-clip, clip)
+    value_loss_1 = (value_clipped.flatten() - rewards) ** 2
+    value_loss_2 = (values.flatten() - rewards) ** 2
+    return torch.mean(torch.max(value_loss_1, value_loss_2))
+
+class PPG:
     def __init__(
         self,
-        obtype,
-        actype,
-        enc_fn,
-        arch="dual",  # shared, detach, dual
+        state_dim,
+        num_actions,
+        actor_hidden_dim,
+        critic_hidden_dim,
+        epochs,
+        epochs_aux,
+        minibatch_size,
+        lr,
+        betas,
+        lam,
+        gamma,
+        beta_s,
+        eps_clip,
+        value_clip
     ):
-        super().__init__()
+        self.actor = Actor(state_dim, actor_hidden_dim, num_actions).to(device)
+        self.critic = Critic(state_dim, critic_hidden_dim).to(device)
+        self.opt_actor = Adam(self.actor.parameters(), lr=lr, betas=betas)
+        self.opt_critic = Adam(self.critic.parameters(), lr=lr, betas=betas)
 
-        detach_value_head = False
-        vf_keys = None
-        pi_key = "pi"
+        self.minibatch_size = minibatch_size
 
-        if arch == "shared":
-            true_vf_key = "pi"
-        elif arch == "detach":
-            true_vf_key = "pi"
-            detach_value_head = True
-        elif arch == "dual":
-            true_vf_key = "vf"
-        else:
-            assert False
+        self.epochs = epochs
+        self.epochs_aux = epochs_aux
 
-        vf_keys = vf_keys or [true_vf_key]
-        self.pi_enc = enc_fn(obtype)
-        self.pi_key = pi_key
-        self.true_vf_key = true_vf_key
-        self.vf_keys = vf_keys
-        self.enc_keys = list(set([pi_key] + vf_keys))
-        self.detach_value_head = detach_value_head
-        pi_outsize, self.make_distr = distr_builder(actype)
+        self.lam = lam
+        self.gamma = gamma
+        self.beta_s = beta_s
 
-        for k in self.enc_keys:
-            self.set_encoder(k, enc_fn(obtype))
+        self.eps_clip = eps_clip
+        self.value_clip = value_clip
 
-        for k in self.vf_keys:
-            lastsize = self.get_encoder(k).codetype.size
-            self.set_vhead(k, tu.NormedLinear(lastsize, 1, scale=0.1))
+    def save(self):
+        torch.save({
+            'actor': self.actor.state_dict(),
+            'critic': self.critic.state_dict()
+        }, f'./ppg.pt')
 
-        lastsize = self.get_encoder(self.pi_key).codetype.size
-        self.pi_head = tu.NormedLinear(lastsize, pi_outsize, scale=0.1)
-        self.aux_vf_head = tu.NormedLinear(lastsize, 1, scale=0.1)
+    def load(self):
+        if not os.path.exists('./ppg.pt'):
+            return
 
-    def compute_aux_loss(self, aux, seg):
-        vtarg = seg["vtarg"]
-        return {
-            "vf_aux": 0.5 * ((aux["vpredaux"] - vtarg) ** 2).mean(),
-            "vf_true": 0.5 * ((aux["vpredtrue"] - vtarg) ** 2).mean(),
-        }
+        data = torch.load(f'./ppg.pt')
+        self.actor.load_state_dict(data['actor'])
+        self.critic.load_state_dict(data['critic'])
 
-    def reshape_x(self, x):
-        b, t = x.shape[:2]
-        x = x.reshape(b, t, -1)
+    def learn(self, memories, aux_memories, next_state):
+        # retrieve and prepare data from memory for training
+        states = []
+        actions = []
+        old_log_probs = []
+        rewards = []
+        masks = []
+        values = []
 
-        return x
+        for mem in memories:
+            states.append(mem.state)
+            actions.append(torch.tensor(mem.action))
+            old_log_probs.append(mem.action_log_prob)
+            rewards.append(mem.reward)
+            masks.append(1 - float(mem.done))
+            values.append(mem.value)
 
-    def get_encoder(self, key):
-        return getattr(self, key + "_enc")
+        # calculate generalized advantage estimate
+        next_state = torch.from_numpy(next_state).to(device)
+        next_value = self.critic(next_state).detach()
+        values = values + [next_value]
 
-    def set_encoder(self, key, enc):
-        setattr(self, key + "_enc", enc)
+        returns = []
+        gae = 0
+        for i in reversed(range(len(rewards))):
+            delta = rewards[i] + self.gamma * values[i + 1] * masks[i] - values[i]
+            gae = delta + self.gamma * self.lam * masks[i] * gae
+            returns.insert(0, gae + values[i])
 
-    def get_vhead(self, key):
-        return getattr(self, key + "_vhead")
+        # convert values to torch tensors
+        to_torch_tensor = lambda t: torch.stack(t).to(device).detach()
 
-    def set_vhead(self, key, layer):
-        setattr(self, key + "_vhead", layer)
+        states = to_torch_tensor(states)
+        actions = to_torch_tensor(actions)
+        old_values = to_torch_tensor(values[:-1])
+        old_log_probs = to_torch_tensor(old_log_probs)
 
-    def forward(self, ob, first, state_in):
-        state_out = {}
-        x_out = {}
+        rewards = torch.tensor(returns).float().to(device)
 
-        for k in self.enc_keys:
-            x_out[k], state_out[k] = self.get_encoder(k)(ob, first, state_in[k])
-            x_out[k] = self.reshape_x(x_out[k])
+        # store state and target values to auxiliary memory buffer for later training
+        aux_memory = AuxMemory(states, rewards, old_values)
+        aux_memories.append(aux_memory)
 
-        pi_x = x_out[self.pi_key]
-        pivec = self.pi_head(pi_x)
-        pd = self.make_distr(pivec)
+        # prepare dataloader for policy phase training
+        dl = create_shuffled_dataloader([states, actions, old_log_probs, rewards, old_values], self.minibatch_size)
 
-        aux = {}
-        for k in self.vf_keys:
-            if self.detach_value_head:
-                x_out[k] = x_out[k].detach()
-            aux[k] = self.get_vhead(k)(x_out[k])[..., 0]
-        vfvec = aux[self.true_vf_key]
-        aux.update({"vpredaux": self.aux_vf_head(pi_x)[..., 0], "vpredtrue": vfvec})
+        # policy phase training, similar to original PPO
+        for _ in range(self.epochs):
+            for states, actions, old_log_probs, rewards, old_values in dl:
+                action_probs, _ = self.actor(states)
+                values = self.critic(states)
+                dist = Categorical(action_probs)
+                action_log_probs = dist.log_prob(actions)
+                entropy = dist.entropy()
 
-        return pd, vfvec, aux, state_out
+                # calculate clipped surrogate objective, classic PPO loss
+                ratios = (action_log_probs - old_log_probs).exp()
+                advantages = normalize(rewards - old_values.detach())
+                surr1 = ratios * advantages
+                surr2 = ratios.clamp(1 - self.eps_clip, 1 + self.eps_clip) * advantages
+                policy_loss = - torch.min(surr1, surr2) - self.beta_s * entropy
 
-    def initial_state(self, batchsize):
-        return {k: self.get_encoder(k).initial_state(batchsize) for k in self.enc_keys}
+                update_network_(policy_loss, self.opt_actor)
 
-    def aux_keys(self):
-        return ["vtarg"]
+                # calculate value loss and update value network separate from policy network
+                value_loss = clipped_value_loss(values, rewards, old_values, self.value_clip)
 
-def make_minibatches(segs, mbsize):
-    """
-    Yield one epoch of minibatch over the dataset described by segs
-    Each minibatch mixes data between different segs
-    """
-    nenv = tu.batch_len(segs[0])
-    nseg = len(segs)
-    envs_segs = th.tensor(list(itertools.product(range(nenv), range(nseg))))
-    for perminds in th.randperm(len(envs_segs)).split(mbsize):
-        esinds = envs_segs[perminds]
-        yield tu.tree_stack(
-            [tu.tree_slice(segs[segind], envind) for (envind, segind) in esinds]
-        )
+                update_network_(value_loss, self.opt_critic)
 
+    def learn_aux(self, aux_memories):
+        # gather states and target values into one tensor
+        states = []
+        rewards = []
+        old_values = []
+        for state, reward, old_value in aux_memories:
+            states.append(state)
+            rewards.append(reward)
+            old_values.append(old_value)
 
-def aux_train(*, model, segs, opt, mbsize, name2coef):
-    """
-    Train on auxiliary loss + policy KL + vf distance
-    """
-    needed_keys = {"ob", "first", "state_in", "oldpd"}.union(model.aux_keys())
-    segs = [{k: seg[k] for k in needed_keys} for seg in segs]
-    for mb in make_minibatches(segs, mbsize):
-        mb = tree_map(lambda x: x.to(tu.dev()), mb)
-        pd, _, aux, _state_out = model(mb["ob"], mb["first"], mb["state_in"])
-        name2loss = {}
-        name2loss["pol_distance"] = td.kl_divergence(mb["oldpd"], pd).mean()
-        name2loss.update(model.compute_aux_loss(aux, mb))
-        assert set(name2coef.keys()).issubset(name2loss.keys())
-        loss = 0
-        for name in name2loss.keys():
-            unscaled_loss = name2loss[name]
-            scaled_loss = unscaled_loss * name2coef.get(name, 1)
-            logger.logkv_mean("unscaled/" + name, unscaled_loss)
-            logger.logkv_mean("scaled/" + name, scaled_loss)
-            loss += scaled_loss
-        opt.zero_grad()
-        loss.backward()
-        tu.sync_grads(model.parameters())
-        opt.step()
+        states = torch.cat(states)
+        rewards = torch.cat(rewards)
+        old_values = torch.cat(old_values)
 
+        # get old action predictions for minimizing kl divergence and clipping respectively
+        old_action_probs, _ = self.actor(states)
+        old_action_probs.detach_()
 
-def compute_presleep_outputs(
-    *, model, segs, mbsize, pdkey="oldpd", vpredkey="oldvpred"
+        # prepared dataloader for auxiliary phase training
+        dl = create_shuffled_dataloader([states, old_action_probs, rewards, old_values], self.minibatch_size)
+
+        # the proposed auxiliary phase training
+        # where the value is distilled into the policy network, while making sure the policy network does not change the action predictions (kl div loss)
+        for epoch in range(self.epochs_aux):
+            for states, old_action_probs, rewards, old_values in tqdm(dl, desc=f'auxiliary epoch {epoch}'):
+                action_probs, policy_values = self.actor(states)
+                action_logprobs = action_probs.log()
+
+                # policy network loss copmoses of both the kl div loss as well as the auxiliary loss
+                aux_loss = clipped_value_loss(policy_values, rewards, old_values, self.value_clip)
+                loss_kl = F.kl_div(action_logprobs, old_action_probs, reduction='batchmean')
+                policy_loss = aux_loss + loss_kl
+
+                update_network_(policy_loss, self.opt_actor)
+
+                # paper says it is important to train the value network extra during the auxiliary phase
+                values = self.critic(states)
+                value_loss = clipped_value_loss(values, rewards, old_values, self.value_clip)
+
+                update_network_(value_loss, self.opt_critic)
+
+# main
+
+def main(
+    env_fn,#env_name = 'LunarLander-v2',
+    num_episodes = 50000,
+    max_timesteps = 500,
+    actor_hidden_dim = 32,
+    critic_hidden_dim = 256,
+    minibatch_size = 64,
+    lr = 0.0005,
+    betas = (0.9, 0.999),
+    lam = 0.95,
+    gamma = 0.99,
+    eps_clip = 0.2,
+    value_clip = 0.4,
+    beta_s = .01,
+    update_timesteps = 5000,
+    num_policy_updates_per_aux = 32,
+    epochs = 1,
+    epochs_aux = 6,
+    seed = None,
+    render = False,
+    render_every_eps = 250,
+    save_every = 1000,
+    load = False,
+    monitor = False
 ):
-    def forward(ob, first, state_in):
-        pd, vpred, _aux, _state_out = model.forward(ob.to(tu.dev()), first, state_in)
-        return pd, vpred
+    # print('env_name is ', env_name)
+    env = env_fn()
 
-    for seg in segs:
-        seg[pdkey], seg[vpredkey] = tu.minibatched_call(
-            forward, mbsize, ob=seg["ob"], first=seg["first"], state_in=seg["state_in"]
-        )
+    if monitor:
+        env = gym.wrappers.Monitor(env, './tmp/', force=True)
 
+    state_dim = env.observation_space.shape[0]
+    num_actions = env.action_space.n
 
-def learn(
-    *,
-    model,
-    venv,
-    ppo_hps,
-    aux_lr,
-    aux_mbsize,
-    n_aux_epochs=6,
-    n_pi=32,
-    kl_ewma_decay=None,
-    interacts_total=float("inf"),
-    name2coef=None,
-    comm=None,
-):
-    """
-    Run PPO for X iterations
-    Then minimize aux loss + KL + value distance for X passes over data
-    """
-    if comm is None:
-        comm = MPI.COMM_WORLD
+    memories = deque([])
+    aux_memories = deque([])
 
-    ppo_state = None
-    aux_state = th.optim.Adam(model.parameters(), lr=aux_lr)
-    name2coef = name2coef or {}
+    agent = PPG(
+        state_dim,
+        num_actions,
+        actor_hidden_dim,
+        critic_hidden_dim,
+        epochs,
+        epochs_aux,
+        minibatch_size,
+        lr,
+        betas,
+        lam,
+        gamma,
+        beta_s,
+        eps_clip,
+        value_clip
+    )
 
-    while True:
-        store_segs = n_pi != 0 and n_aux_epochs != 0
+    if load:
+        agent.load()
 
-        # Policy phase
-        ppo_state = ppo.learn(
-            venv=venv,
-            model=model,
-            learn_state=ppo_state,
-            callbacks=[
-                lambda _l: n_pi > 0 and _l["curr_iteration"] >= n_pi,
-            ],
-            interacts_total=interacts_total,
-            store_segs=store_segs,
-            comm=comm,
-            **ppo_hps,
-        )
+    if exists(seed):
+        torch.manual_seed(seed)
+        np.random.seed(seed)
 
-        if ppo_state["curr_interact_count"] >= interacts_total:
-            break
+    time = 0
+    updated = False
+    num_policy_updates = 0
 
-        if n_aux_epochs > 0:
-            segs = ppo_state["seg_buf"]
-            compute_presleep_outputs(model=model, segs=segs, mbsize=aux_mbsize)
-            # Auxiliary phase
-            for i in range(n_aux_epochs):
-                logger.log(f"Aux epoch {i}")
-                aux_train(
-                    model=model,
-                    segs=segs,
-                    opt=aux_state,
-                    mbsize=aux_mbsize,
-                    name2coef=name2coef,
-                )
-                logger.dumpkvs()
-            segs.clear()
+    for eps in tqdm(range(num_episodes), desc='episodes'):
+        render_eps = render and eps % render_every_eps == 0
+        state = env.reset()
+        for timestep in range(max_timesteps):
+            time += 1
+
+            if updated and render_eps:
+                env.render()
+
+            state = torch.from_numpy(state).to(device)
+            action_probs, _ = agent.actor(state)
+            value = agent.critic(state)
+
+            dist = Categorical(action_probs)
+            action = dist.sample()
+            action_log_prob = dist.log_prob(action)
+            action = action.item()
+
+            next_state, reward, done, _ = env.step(action)
+
+            memory = Memory(state, action, action_log_prob, reward, done, value)
+            memories.append(memory)
+
+            state = next_state
+
+            if time % update_timesteps == 0:
+                agent.learn(memories, aux_memories, next_state)
+                num_policy_updates += 1
+                memories.clear()
+
+                if num_policy_updates % num_policy_updates_per_aux == 0:
+                    agent.learn_aux(aux_memories)
+                    aux_memories.clear()
+
+                updated = True
+
+            if done:
+                if render_eps:
+                    updated = False
+                break
+
+        if render_eps:
+            env.close()
+
+        if eps % save_every == 0:
+            agent.save()
+
+if __name__ == '__main__':
+    main()

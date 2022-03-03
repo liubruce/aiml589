@@ -1,264 +1,378 @@
-"""
-Mostly copied from ppo.py but with some extra options added that are relevant to phasic
-"""
-
 import numpy as np
-import torch as th
-from mpi4py import MPI
-from .tree_util import tree_map
-from . import torch_util as tu
-from .log_save_helper import LogSaveHelper
-from .minibatch_optimize import minibatch_optimize
-from .roller import Roller
-from .reward_normalizer import RewardNormalizer
+import torch
+from torch.optim import Adam
+import gym
+import time
+import spinup.algos.pytorch.ppg.core as core
+from spinup.utils.logx import EpochLogger
+from spinup.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
+from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 
-import math
-from . import logger
 
-INPUT_KEYS = {"ob", "ac", "first", "logp", "vtarg", "adv", "state_in"}
+class PPOBuffer:
+    """
+    A buffer for storing trajectories experienced by a PPO agent interacting
+    with the environment, and using Generalized Advantage Estimation (GAE-Lambda)
+    for calculating the advantages of state-action pairs.
+    """
 
-def compute_gae(
-    *,
-    vpred: "(th.Tensor[1, float]) value predictions",
-    reward: "(th.Tensor[1, float]) rewards",
-    first: "(th.Tensor[1, bool]) mark beginning of episodes",
-    γ: "(float)",
-    λ: "(float)"
-):
-    orig_device = vpred.device
-    assert orig_device == reward.device == first.device
-    vpred, reward, first = (x.cpu() for x in (vpred, reward, first))
-    first = first.to(dtype=th.float32)
-    assert first.dim() == 2
-    nenv, nstep = reward.shape
-    assert vpred.shape == first.shape == (nenv, nstep + 1)
-    adv = th.zeros(nenv, nstep, dtype=th.float32)
-    lastgaelam = 0
-    for t in reversed(range(nstep)):
-        notlast = 1.0 - first[:, t + 1]
-        nextvalue = vpred[:, t + 1]
-        # notlast: whether next timestep is from the same episode
-        delta = reward[:, t] + notlast * γ * nextvalue - vpred[:, t]
-        adv[:, t] = lastgaelam = delta + notlast * γ * λ * lastgaelam
-    vtarg = vpred[:, :-1] + adv
-    return adv.to(device=orig_device), vtarg.to(device=orig_device)
+    def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95):
+        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
+        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
+        self.adv_buf = np.zeros(size, dtype=np.float32)
+        self.rew_buf = np.zeros(size, dtype=np.float32)
+        self.ret_buf = np.zeros(size, dtype=np.float32)
+        self.val_buf = np.zeros(size, dtype=np.float32)
+        self.logp_buf = np.zeros(size, dtype=np.float32)
+        self.gamma, self.lam = gamma, lam
+        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
-def log_vf_stats(comm, **kwargs):
-    logger.logkv(
-        "VFStats/EV", tu.explained_variance(kwargs["vpred"], kwargs["vtarg"], comm)
-    )
-    for key in ["vpred", "vtarg", "adv"]:
-        logger.logkv_mean(f"VFStats/{key.capitalize()}Mean", kwargs[key].mean())
-        logger.logkv_mean(f"VFStats/{key.capitalize()}Std", kwargs[key].std())
+    def store(self, obs, act, rew, val, logp):
+        """
+        Append one timestep of agent-environment interaction to the buffer.
+        """
+        assert self.ptr < self.max_size     # buffer has to have room so you can store
+        self.obs_buf[self.ptr] = obs
+        self.act_buf[self.ptr] = act
+        self.rew_buf[self.ptr] = rew
+        self.val_buf[self.ptr] = val
+        self.logp_buf[self.ptr] = logp
+        self.ptr += 1
 
-def compute_advantage(model, seg, γ, λ, comm=None):
-    comm = comm or MPI.COMM_WORLD
-    finalob, finalfirst = seg["finalob"], seg["finalfirst"]
-    vpredfinal = model.v(finalob, finalfirst, seg["finalstate"])
-    reward = seg["reward"]
-    logger.logkv("Misc/FrameRewMean", reward.mean())
-    adv, vtarg = compute_gae(
-        γ=γ,
-        λ=λ,
-        reward=reward,
-        vpred=th.cat([seg["vpred"], vpredfinal[:, None]], dim=1),
-        first=th.cat([seg["first"], finalfirst[:, None]], dim=1),
-    )
-    log_vf_stats(comm, adv=adv, vtarg=vtarg, vpred=seg["vpred"])
-    seg["vtarg"] = vtarg
-    adv_mean, adv_var = tu.mpi_moments(comm, adv)
-    seg["adv"] = (adv - adv_mean) / (math.sqrt(adv_var) + 1e-8)
+    def finish_path(self, last_val=0):
+        """
+        Call this at the end of a trajectory, or when one gets cut off
+        by an epoch ending. This looks back in the buffer to where the
+        trajectory started, and uses rewards and value estimates from
+        the whole trajectory to compute advantage estimates with GAE-Lambda,
+        as well as compute the rewards-to-go for each state, to use as
+        the targets for the value function.
 
-def compute_losses(
-    model,
-    ob,
-    ac,
-    first,
-    logp,
-    vtarg,
-    adv,
-    state_in,
-    clip_param,
-    vfcoef,
-    entcoef,
-    kl_penalty,
-):
-    losses = {}
-    diags = {}
-    pd, vpred, aux, _state_out = model(ob=ob, first=first, state_in=state_in)
-    newlogp = tu.sum_nonbatch(pd.log_prob(ac))
-    # prob ratio for KL / clipping based on a (possibly) recomputed logp
-    logratio = newlogp - logp
-    ratio = th.exp(logratio)
+        The "last_val" argument should be 0 if the trajectory ended
+        because the agent reached a terminal state (died), and otherwise
+        should be V(s_T), the value function estimated for the last state.
+        This allows us to bootstrap the reward-to-go calculation to account
+        for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
+        """
 
-    if clip_param > 0:
-        pg_losses = -adv * ratio
-        pg_losses2 = -adv * th.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param)
-        pg_losses = th.max(pg_losses, pg_losses2)
-    else:
-        pg_losses = -adv * th.exp(newlogp - logp)
+        path_slice = slice(self.path_start_idx, self.ptr)
+        rews = np.append(self.rew_buf[path_slice], last_val)
+        vals = np.append(self.val_buf[path_slice], last_val)
+        
+        # the next two lines implement GAE-Lambda advantage calculation
+        deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
+        self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)
+        
+        # the next line computes rewards-to-go, to be targets for the value function
+        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)[:-1]
+        
+        self.path_start_idx = self.ptr
 
-    diags["entropy"] = entropy = tu.sum_nonbatch(pd.entropy()).mean()
-    diags["negent"] = -entropy * entcoef
-    diags["pg"] = pg_losses.mean()
-    diags["pi_kl"] = kl_penalty * 0.5 * (logratio ** 2).mean()
+    def get(self):
+        """
+        Call this at the end of an epoch to get all of the data from
+        the buffer, with advantages appropriately normalized (shifted to have
+        mean zero and std one). Also, resets some pointers in the buffer.
+        """
+        assert self.ptr == self.max_size    # buffer has to be full before you can get
+        self.ptr, self.path_start_idx = 0, 0
+        # the next two lines implement the advantage normalization trick
+        adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
+        self.adv_buf = (self.adv_buf - adv_mean) / adv_std
+        data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
+                    adv=self.adv_buf, logp=self.logp_buf)
+        return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
-    losses["pi"] = diags["negent"] + diags["pg"] + diags["pi_kl"]
-    losses["vf"] = vfcoef * ((vpred - vtarg) ** 2).mean()
 
-    with th.no_grad():
-        diags["clipfrac"] = (th.abs(ratio - 1) > clip_param).float().mean()
-        diags["approxkl"] = 0.5 * (logratio ** 2).mean()
 
-    return losses, diags
+def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
+        steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.2, pi_lr=3e-4,
+        vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
+        target_kl=0.01, logger_kwargs=dict(), save_freq=10):
+    """
+    Proximal Policy Optimization (by clipping), 
 
-def learn(
-    *,
-    venv: "(VecEnv) vectorized environment",
-    model: "(ppo.PpoModel)",
-    interacts_total: "(float) total timesteps of interaction" = float("inf"),
-    nstep: "(int) number of serial timesteps" = 256,
-    γ: "(float) discount" = 0.99,
-    λ: "(float) GAE parameter" = 0.95,
-    clip_param: "(float) PPO parameter for clipping prob ratio" = 0.2,
-    vfcoef: "(float) value function coefficient" = 0.5,
-    entcoef: "(float) entropy coefficient" = 0.01,
-    nminibatch: "(int) number of minibatches to break epoch of data into" = 4,
-    n_epoch_vf: "(int) number of epochs to use when training the value function" = 1,
-    n_epoch_pi: "(int) number of epochs to use when training the policy" = 1,
-    lr: "(float) Adam learning rate" = 5e-4,
-    default_loss_weights: "(dict) default_loss_weights" = {},
-    store_segs: "(bool) whether or not to store segments in a buffer" = True,
-    verbose: "(bool) print per-epoch loss stats" = True,
-    log_save_opts: "(dict) passed into LogSaveHelper" = {},
-    rnorm: "(bool) reward normalization" = True,
-    kl_penalty: "(int) weight of the KL penalty, which can be used in place of clipping" = 0,
-    grad_weight: "(float) relative weight of this worker's gradients" = 1,
-    comm: "(MPI.Comm) MPI communicator" = None,
-    callbacks: "(seq of function(dict)->bool) to run each update" = (),
-    learn_state: "dict with optional keys {'opts', 'roller', 'lsh', 'reward_normalizer', 'curr_interact_count', 'seg_buf'}" = None,
-):
-    if comm is None:
-        comm = MPI.COMM_WORLD
+    with early stopping based on approximate KL
 
-    learn_state = learn_state or {}
-    ic_per_step = venv.num * comm.size * nstep
+    Args:
+        env_fn : A function which creates a copy of the environment.
+            The environment must satisfy the OpenAI Gym API.
 
-    opt_keys = (
-        ["pi", "vf"] if (n_epoch_pi != n_epoch_vf) else ["pi"]
-    )  # use separate optimizers when n_epoch_pi != n_epoch_vf
-    params = list(model.parameters())
-    opts = learn_state.get("opts") or {
-        k: th.optim.Adam(params, lr=lr)
-        for k in opt_keys
-    }
+        actor_critic: The constructor method for a PyTorch Module with a 
+            ``step`` method, an ``act`` method, a ``pi`` module, and a ``v`` 
+            module. The ``step`` method should accept a batch of observations 
+            and return:
 
-    tu.sync_params(params)
+            ===========  ================  ======================================
+            Symbol       Shape             Description
+            ===========  ================  ======================================
+            ``a``        (batch, act_dim)  | Numpy array of actions for each 
+                                           | observation.
+            ``v``        (batch,)          | Numpy array of value estimates
+                                           | for the provided observations.
+            ``logp_a``   (batch,)          | Numpy array of log probs for the
+                                           | actions in ``a``.
+            ===========  ================  ======================================
 
-    if rnorm:
-        reward_normalizer = learn_state.get("reward_normalizer") or RewardNormalizer(venv.num)
-    else:
-        reward_normalizer = None
+            The ``act`` method behaves the same as ``step`` but only returns ``a``.
 
-    def get_weight(k):
-        return default_loss_weights[k] if k in default_loss_weights else 1.0
+            The ``pi`` module's forward call should accept a batch of 
+            observations and optionally a batch of actions, and return:
 
-    def train_with_losses_and_opt(loss_keys, opt, **arrays):
-        losses, diags = compute_losses(
-            model,
-            entcoef=entcoef,
-            kl_penalty=kl_penalty,
-            clip_param=clip_param,
-            vfcoef=vfcoef,
-            **arrays,
-        )
-        loss = sum([losses[k] * get_weight(k) for k in loss_keys])
-        opt.zero_grad()
-        loss.backward()
-        tu.warn_no_gradient(model, "PPO")
-        tu.sync_grads(params, grad_weight=grad_weight)
-        diags = {k: v.detach() for (k, v) in diags.items()}
-        opt.step()
-        diags.update({f"loss_{k}": v.detach() for (k, v) in losses.items()})
-        return diags
+            ===========  ================  ======================================
+            Symbol       Shape             Description
+            ===========  ================  ======================================
+            ``pi``       N/A               | Torch Distribution object, containing
+                                           | a batch of distributions describing
+                                           | the policy for the provided observations.
+            ``logp_a``   (batch,)          | Optional (only returned if batch of
+                                           | actions is given). Tensor containing 
+                                           | the log probability, according to 
+                                           | the policy, of the provided actions.
+                                           | If actions not given, will contain
+                                           | ``None``.
+            ===========  ================  ======================================
 
-    def train_pi(**arrays):
-        return train_with_losses_and_opt(["pi"], opts["pi"], **arrays)
+            The ``v`` module's forward call should accept a batch of observations
+            and return:
 
-    def train_vf(**arrays):
-        return train_with_losses_and_opt(["vf"], opts["vf"], **arrays)
+            ===========  ================  ======================================
+            Symbol       Shape             Description
+            ===========  ================  ======================================
+            ``v``        (batch,)          | Tensor containing the value estimates
+                                           | for the provided observations. (Critical: 
+                                           | make sure to flatten this!)
+            ===========  ================  ======================================
 
-    def train_pi_and_vf(**arrays):
-        return train_with_losses_and_opt(["pi", "vf"], opts["pi"], **arrays)
 
-    roller = learn_state.get("roller") or Roller(
-        act_fn=model.act,
-        venv=venv,
-        initial_state=model.initial_state(venv.num),
-        keep_buf=100,
-        keep_non_rolling=log_save_opts.get("log_new_eps", False),
-    )
+        ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object 
+            you provided to PPO.
 
-    lsh = learn_state.get("lsh") or LogSaveHelper(
-        ic_per_step=ic_per_step, model=model, comm=comm, **log_save_opts
-    )
+        seed (int): Seed for random number generators.
 
-    callback_exit = False  # Does callback say to exit loop?
+        steps_per_epoch (int): Number of steps of interaction (state-action pairs) 
+            for the agent and the environment in each epoch.
 
-    curr_interact_count = learn_state.get("curr_interact_count") or 0
-    curr_iteration = 0
-    seg_buf = learn_state.get("seg_buf") or []
+        epochs (int): Number of epochs of interaction (equivalent to
+            number of policy updates) to perform.
 
-    while curr_interact_count < interacts_total and not callback_exit:
-        seg = roller.multi_step(nstep)
-        lsh.gather_roller_stats(roller)
-        if rnorm:
-            seg["reward"] = reward_normalizer(seg["reward"], seg["first"])
-        compute_advantage(model, seg, γ, λ, comm=comm)
+        gamma (float): Discount factor. (Always between 0 and 1.)
 
-        if store_segs:
-            seg_buf.append(tree_map(lambda x: x.cpu(), seg))
+        clip_ratio (float): Hyperparameter for clipping in the policy objective.
+            Roughly: how far can the new policy go from the old policy while 
+            still profiting (improving the objective function)? The new policy 
+            can still go farther than the clip_ratio says, but it doesn't help
+            on the objective anymore. (Usually small, 0.1 to 0.3.) Typically
+            denoted by :math:`\epsilon`. 
 
-        with logger.profile_kv("optimization"):
-            # when n_epoch_pi != n_epoch_vf, we perform separate policy and vf epochs with separate optimizers
-            if n_epoch_pi != n_epoch_vf:
-                minibatch_optimize(
-                    train_vf,
-                    {k: seg[k] for k in INPUT_KEYS},
-                    nminibatch=nminibatch,
-                    comm=comm,
-                    nepoch=n_epoch_vf,
-                    verbose=verbose,
-                )
+        pi_lr (float): Learning rate for policy optimizer.
 
-                train_fn = train_pi
-            else:
-                train_fn = train_pi_and_vf
+        vf_lr (float): Learning rate for value function optimizer.
 
-            epoch_stats = minibatch_optimize(
-                train_fn,
-                {k: seg[k] for k in INPUT_KEYS},
-                nminibatch=nminibatch,
-                comm=comm,
-                nepoch=n_epoch_pi,
-                verbose=verbose,
-            )
-            for (k, v) in epoch_stats[-1].items():
-                logger.logkv("Opt/" + k, v)
+        train_pi_iters (int): Maximum number of gradient descent steps to take 
+            on policy loss per epoch. (Early stopping may cause optimizer
+            to take fewer than this.)
 
-        lsh()
+        train_v_iters (int): Number of gradient descent steps to take on 
+            value function per epoch.
 
-        curr_interact_count += ic_per_step
-        curr_iteration += 1
+        lam (float): Lambda for GAE-Lambda. (Always between 0 and 1,
+            close to 1.)
 
-        for callback in callbacks:
-            callback_exit = callback_exit or bool(callback(locals()))
+        max_ep_len (int): Maximum length of trajectory / episode / rollout.
 
-    return dict(
-        opts=opts,
-        roller=roller,
-        lsh=lsh,
-        reward_normalizer=reward_normalizer,
-        curr_interact_count=curr_interact_count,
-        seg_buf=seg_buf,
-    )
+        target_kl (float): Roughly what KL divergence we think is appropriate
+            between new and old policies after an update. This will get used 
+            for early stopping. (Usually small, 0.01 or 0.05.)
+
+        logger_kwargs (dict): Keyword args for EpochLogger.
+
+        save_freq (int): How often (in terms of gap between epochs) to save
+            the current policy and value function.
+
+    """
+
+    # Special function to avoid certain slowdowns from PyTorch + MPI combo.
+    setup_pytorch_for_mpi()
+
+    # Set up logger and save configuration
+    logger = EpochLogger(**logger_kwargs)
+    logger.save_config(locals())
+
+    # Random seed
+    seed += 10000 * proc_id()
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    # Instantiate environment
+    env = env_fn()
+    obs_dim = env.observation_space.shape
+    act_dim = env.action_space.shape
+
+    # Create actor-critic module
+    ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+
+    # Sync params across processes
+    sync_params(ac)
+
+    # Count variables
+    var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
+    logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n'%var_counts)
+
+    # Set up experience buffer
+    local_steps_per_epoch = int(steps_per_epoch / num_procs())
+    buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
+
+    # Set up function for computing PPO policy loss
+    def compute_loss_pi(data):
+        obs, act, adv, logp_old = data['obs'], data['act'], data['adv'], data['logp']
+
+        # Policy loss
+        pi, logp = ac.pi(obs, act)
+        ratio = torch.exp(logp - logp_old)
+        clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv
+        loss_pi = -(torch.min(ratio * adv, clip_adv)).mean()
+
+        # Useful extra info
+        approx_kl = (logp_old - logp).mean().item()
+        ent = pi.entropy().mean().item()
+        clipped = ratio.gt(1+clip_ratio) | ratio.lt(1-clip_ratio)
+        clipfrac = torch.as_tensor(clipped, dtype=torch.float32).mean().item()
+        pi_info = dict(kl=approx_kl, ent=ent, cf=clipfrac)
+
+        return loss_pi, pi_info
+
+    # Set up function for computing value loss
+    def compute_loss_v(data):
+        obs, ret = data['obs'], data['ret']
+        return ((ac.v(obs) - ret)**2).mean()
+
+    # Set up optimizers for policy and value function
+    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
+    vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
+
+    # Set up model saving
+    logger.setup_pytorch_saver(ac)
+
+    def update():
+        data = buf.get()
+
+        pi_l_old, pi_info_old = compute_loss_pi(data)
+        pi_l_old = pi_l_old.item()
+        v_l_old = compute_loss_v(data).item()
+
+        # Train policy with multiple steps of gradient descent
+        for i in range(train_pi_iters):
+            pi_optimizer.zero_grad()
+            loss_pi, pi_info = compute_loss_pi(data)
+            kl = mpi_avg(pi_info['kl'])
+            if kl > 1.5 * target_kl:
+                logger.log('Early stopping at step %d due to reaching max kl.'%i)
+                break
+            loss_pi.backward()
+            mpi_avg_grads(ac.pi)    # average grads across MPI processes
+            pi_optimizer.step()
+
+        logger.store(StopIter=i)
+
+        # Value function learning
+        for i in range(train_v_iters):
+            vf_optimizer.zero_grad()
+            loss_v = compute_loss_v(data)
+            loss_v.backward()
+            mpi_avg_grads(ac.v)    # average grads across MPI processes
+            vf_optimizer.step()
+
+        # Log changes from update
+        kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
+        logger.store(LossPi=pi_l_old, LossV=v_l_old,
+                     KL=kl, Entropy=ent, ClipFrac=cf,
+                     DeltaLossPi=(loss_pi.item() - pi_l_old),
+                     DeltaLossV=(loss_v.item() - v_l_old))
+
+    # Prepare for interaction with environment
+    start_time = time.time()
+    o, ep_ret, ep_len = env.reset(), 0, 0
+
+    # Main loop: collect experience in env and update/log each epoch
+    for epoch in range(epochs):
+        for t in range(local_steps_per_epoch):
+            a, v, logp = ac.step(torch.as_tensor(o, dtype=torch.float32))
+
+            next_o, r, d, _ = env.step(a)
+            ep_ret += r
+            ep_len += 1
+
+            # save and log
+            buf.store(o, a, r, v, logp)
+            logger.store(VVals=v)
+            
+            # Update obs (critical!)
+            o = next_o
+
+            timeout = ep_len == max_ep_len
+            terminal = d or timeout
+            epoch_ended = t==local_steps_per_epoch-1
+
+            if terminal or epoch_ended:
+                if epoch_ended and not(terminal):
+                    print('Warning: trajectory cut off by epoch at %d steps.'%ep_len, flush=True)
+                # if trajectory didn't reach terminal state, bootstrap value target
+                if timeout or epoch_ended:
+                    _, v, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
+                else:
+                    v = 0
+                buf.finish_path(v)
+                if terminal:
+                    # only save EpRet / EpLen if trajectory finished
+                    logger.store(EpRet=ep_ret, EpLen=ep_len)
+                o, ep_ret, ep_len = env.reset(), 0, 0
+
+
+        # Save model
+        if (epoch % save_freq == 0) or (epoch == epochs-1):
+            logger.save_state({'env': env}, None)
+
+        # Perform PPO update!
+        update()
+
+        # Log info about epoch
+        logger.log_tabular('Epoch', epoch)
+        logger.log_tabular('EpRet', with_min_and_max=True)
+        logger.log_tabular('EpLen', average_only=True)
+        logger.log_tabular('VVals', with_min_and_max=True)
+        logger.log_tabular('TotalEnvInteracts', (epoch+1)*steps_per_epoch)
+        logger.log_tabular('LossPi', average_only=True)
+        logger.log_tabular('LossV', average_only=True)
+        logger.log_tabular('DeltaLossPi', average_only=True)
+        logger.log_tabular('DeltaLossV', average_only=True)
+        logger.log_tabular('Entropy', average_only=True)
+        logger.log_tabular('KL', average_only=True)
+        logger.log_tabular('ClipFrac', average_only=True)
+        logger.log_tabular('StopIter', average_only=True)
+        logger.log_tabular('Time', time.time()-start_time)
+        logger.dump_tabular()
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
+    parser.add_argument('--hid', type=int, default=64)
+    parser.add_argument('--l', type=int, default=2)
+    parser.add_argument('--gamma', type=float, default=0.99)
+    parser.add_argument('--seed', '-s', type=int, default=0)
+    parser.add_argument('--cpu', type=int, default=4)
+    parser.add_argument('--steps', type=int, default=4000)
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--exp_name', type=str, default='ppo')
+    args = parser.parse_args()
+
+    mpi_fork(args.cpu)  # run parallel code with mpi
+
+    from spinup.utils.run_utils import setup_logger_kwargs
+    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+
+    ppo(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic,
+        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma, 
+        seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs,
+        logger_kwargs=logger_kwargs)

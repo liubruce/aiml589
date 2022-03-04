@@ -1,14 +1,19 @@
 """Core functions of the TD3 algorithm."""
 
-import tensorflow as tf
-
+import torch
+import torch.nn as nn
 
 def mlp(hidden_sizes, activation, trainable=True, name=None):
     """Creates MLP with the specified parameters."""
-    return tf.keras.Sequential([
-        tf.keras.layers.Dense(size, activation=activation, trainable=trainable)
-        for size in hidden_sizes
-    ], name)
+    # return tf.keras.Sequential([
+    #     tf.keras.layers.Dense(size, activation=activation, trainable=trainable)
+    #     for size in hidden_sizes
+    # ], name)
+
+    layers = []
+    for j in range(len(hidden_sizes)-1):
+        layers += [nn.Linear(hidden_sizes[j], hidden_sizes[j+1]), activation()]
+    return nn.Sequential(*layers)
 
 
 class MLPActorCriticFactory:

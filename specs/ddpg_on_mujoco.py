@@ -20,6 +20,10 @@ params_grid = {
         'Walker2d-v3',
         'Ant-v3',
         'Humanoid-v3',
+        'Halfcheetah-v3'
+        # 'lunarlander - continuous version', # from gym
+        # 'reacher', # gym
+        # 'invertedoublependulum', # gym
     ],
     'seed': [42,
              7, 224444444, 11, 14,

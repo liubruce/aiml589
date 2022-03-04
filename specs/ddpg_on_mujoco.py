@@ -16,11 +16,11 @@ base_config = {
 
 params_grid = {
     'task': [
-        'Hopper-v3',
-        'Walker2d-v3',
-        'Ant-v3',
-        'Humanoid-v3',
-        'Halfcheetah-v3'
+        # 'Hopper-v3',
+        # 'Walker2d-v3',
+        # 'Ant-v3',
+        # 'Humanoid-v3',
+        'HalfCheetah-v3'
         # 'lunarlander - continuous version', # from gym
         # 'reacher', # gym
         # 'invertedoublependulum', # gym

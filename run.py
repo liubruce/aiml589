@@ -82,15 +82,17 @@ def run(config):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("config")
+    parser.add_argument("problem")
+    parser.add_argument("task_id")
     args = parser.parse_args()
-
     vars_ = dict()
     with open(args.config) as f:
         exec(f.read(), vars_)
-
-    params_grid = skl_ms.ParameterGrid(vars_['params_grid'])
-    for idx, params in enumerate(params_grid):
-        run({**vars_['base_config'], **params, 'experiment_id': idx})
+    # params_grid = skl_ms.ParameterGrid(vars_['params_grid'])
+    # for idx, params in enumerate(params_grid):
+        # {'seed': 42, 'task': 'HalfCheetah-v3'}
+    print('args are ', args)
+    # run({**vars_['base_config'], 'seed': int(args.task_id), 'task': args.problem, 'experiment_id': int(args.task_id)})
 
 
 if __name__ == '__main__':

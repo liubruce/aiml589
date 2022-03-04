@@ -1,17 +1,17 @@
 base_config = {
-    'agent': '@spinup.algos.pytorch.PPG',
+    'agent': '@spinup.algos.pytorch.PPO',
     # 'total_steps': 3_000_0,
     # 'num_test_episodes': 30,
-    # 'ac_kwargs': {
-    #     'hidden_sizes': [256, 256],
-    #     # 'activation': 'relu',
-    #     #'prior_weight': 0.0
-    # },
-    # 'save_freq': 1_000_000,
-    #'save_path': './out/checkpoint',
-    # 'logger_kwargs': {
-    #     'exp_name': 'ppg'
-    # }
+    'ac_kwargs': {
+        'hidden_sizes': [256, 256],
+        # 'activation': 'relu',
+        #'prior_weight': 0.0
+    },
+    'save_freq': 1_000_000,
+    # 'save_path': './out/checkpoint',
+    'logger_kwargs': {
+        'exp_name': 'ppo'
+    }
 }
 
 params_grid = {

@@ -8,7 +8,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
-from spinup.algos.tf2.ed2 import core
+from spinup.algos.pytorch.ed2 import core
 from spinup.utils import logx
 from spinup.utils import tracing
 

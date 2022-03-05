@@ -91,8 +91,8 @@ def main():
     # params_grid = skl_ms.ParameterGrid(vars_['params_grid'])
     # for idx, params in enumerate(params_grid):
         # {'seed': 42, 'task': 'HalfCheetah-v3'}
-    print('args are ', args)
-    # run({**vars_['base_config'], 'seed': int(args.task_id), 'task': args.problem, 'experiment_id': int(args.task_id)})
+    # print('args are ', args)
+    run({**vars_['base_config'], 'seed': int(args.task_id), 'task': args.problem, 'experiment_id': int(args.task_id)})
 
 
 if __name__ == '__main__':

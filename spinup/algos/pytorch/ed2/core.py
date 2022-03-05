@@ -1,114 +1,62 @@
-"""Core functions of the TD3 algorithm."""
+import numpy as np
+import scipy.signal
 
 import torch
 import torch.nn as nn
 
-def mlp(hidden_sizes, activation, trainable=True, name=None):
-    """Creates MLP with the specified parameters."""
-    # return tf.keras.Sequential([
-    #     tf.keras.layers.Dense(size, activation=activation, trainable=trainable)
-    #     for size in hidden_sizes
-    # ], name)
 
+def combined_shape(length, shape=None):
+    if shape is None:
+        return (length,)
+    return (length, shape) if np.isscalar(shape) else (length, *shape)
+
+def mlp(sizes, activation, output_activation=nn.Identity):
     layers = []
-    for j in range(len(hidden_sizes)-1):
-        layers += [nn.Linear(hidden_sizes[j], hidden_sizes[j+1]), activation()]
+    for j in range(len(sizes)-1):
+        act = activation if j < len(sizes)-2 else output_activation
+        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
     return nn.Sequential(*layers)
 
+def count_vars(module):
+    return sum([np.prod(p.shape) for p in module.parameters()])
 
-class MLPActorCriticFactory:
-    """Factory of MLP stochastic actors and critics.
+class MLPActor(nn.Module):
 
-    Args:
-        observation_space (gym.spaces.Box): A continuous observation space
-          specification.
-        action_space (gym.spaces.Box): A continuous action space
-          specification.
-        hidden_sizes (list): A hidden layers shape specification.
-        activation (tf.function): A hidden layers activations specification.
-        act_noise (float): Stddev for Gaussian exploration noise.
-        ac_number (int): Number of the actor-critic models in the ensemble.
-        prior_weight (float): Randomly initialized network output scaling.
-    """
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit):
+        super().__init__()
+        pi_sizes = [obs_dim] + list(hidden_sizes) + [act_dim]
+        self.pi = mlp(pi_sizes, activation, nn.Tanh)
+        self.act_limit = act_limit
 
-    def __init__(self, observation_space, action_space, hidden_sizes,
-                 activation, prior_weight, act_noise, ac_number):
-        self._obs_dim = observation_space.shape[0]
-        self._act_dim = action_space.shape[0]
-        self._act_scale = action_space.high[0]
-        self._hidden_sizes = hidden_sizes
-        self._activation = activation
-        self._act_noise = act_noise
-        self._ac_number = ac_number
-        self._prior_weight = prior_weight
+    def forward(self, obs):
+        # Return output from network scaled to action space limits.
+        return self.act_limit * self.pi(obs)
 
-    def _make_actor(self):
-        """Constructs and returns the actor model (tf.keras.Model)."""
-        obs_input = tf.keras.Input(shape=(self._obs_dim,))
-        body = mlp(self._hidden_sizes, self._activation)(obs_input)
-        mu = tf.keras.layers.Dense(self._act_dim)(body)
+class MLPQFunction(nn.Module):
 
-        # Normalize the actions.
-        g = tf.reduce_mean(tf.math.abs(mu), axis=1, keepdims=True)
-        g = tf.maximum(g, tf.ones_like(g))
-        mu = mu / g
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
+        super().__init__()
+        self.q = mlp([obs_dim + act_dim] + list(hidden_sizes) + [1], activation)
 
-        # Add the action noise.
-        pi = mu + self._act_noise * tf.random.normal(tf.shape(mu))
+    def forward(self, obs, act):
+        q = self.q(torch.cat([obs, act], dim=-1))
+        return torch.squeeze(q, -1) # Critical to ensure q has right shape.
 
-        # Put the actions in the limit.
-        mu = tf.tanh(mu) * self._act_scale
-        pi = tf.tanh(pi) * self._act_scale
+class MLPActorCritic(nn.Module):
 
-        return tf.keras.Model(inputs=obs_input, outputs=[mu, pi])
+    def __init__(self, observation_space, action_space, hidden_sizes=(256,256),
+                 activation=nn.ReLU):
+        super().__init__()
 
-    def make_actor(self):
-        """Constructs and returns the ensemble of actor models."""
-        obs_inputs = tf.keras.Input(shape=(None, self._obs_dim),
-                                    batch_size=self._ac_number)
-        mus, pis = [], []
-        for obs_input in tf.unstack(obs_inputs, axis=0):
-            model = self._make_actor()
-            mu, pi = model(obs_input)
-            mus.append(mu)
-            pis.append(pi)
-        return tf.keras.Model(inputs=obs_inputs, outputs=[
-            tf.stack(mus, axis=0),
-            tf.stack(pis, axis=0),
-        ])
+        obs_dim = observation_space.shape[0]
+        act_dim = action_space.shape[0]
+        act_limit = action_space.high[0]
 
-    def _make_critic(self, trainable=True):
-        """Constructs and returns the critic model (tf.keras.Model)."""
-        obs_input = tf.keras.Input(shape=(self._obs_dim,))
-        act_input = tf.keras.Input(shape=(self._act_dim,))
+        # build policy and value functions
+        self.pi = MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
+        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
+        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
 
-        concat_input = tf.keras.layers.Concatenate(
-            axis=-1)([obs_input, act_input])
-
-        q = tf.keras.Sequential([
-            mlp(self._hidden_sizes, self._activation, trainable=trainable),
-            tf.keras.layers.Dense(1, trainable=trainable),
-            tf.keras.layers.Reshape([])  # Very important to squeeze values!
-        ])(concat_input)
-
-        return tf.keras.Model(inputs=[obs_input, act_input], outputs=q)
-
-    def make_critic(self):
-        """Constructs and returns the ensemble of critic models."""
-        obs_inputs = tf.keras.Input(shape=(None, self._obs_dim),
-                                    batch_size=self._ac_number)
-        act_inputs = tf.keras.Input(shape=(None, self._act_dim),
-                                    batch_size=self._ac_number)
-        qs = []
-        for obs_input, act_input in zip(tf.unstack(obs_inputs, axis=0),
-                                        tf.unstack(act_inputs, axis=0)):
-            model = self._make_critic()
-            q = model([obs_input, act_input])
-
-            if self._prior_weight > 0:
-                prior = self._make_critic(trainable=False)
-                q += self._prior_weight * prior([obs_input, act_input])
-
-            qs.append(q)
-        return tf.keras.Model(inputs=[obs_inputs, act_inputs],
-                              outputs=tf.stack(qs, axis=0))
+    def act(self, obs):
+        with torch.no_grad():
+            return self.pi(obs).numpy()

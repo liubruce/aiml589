@@ -1,6 +1,6 @@
 base_config = {
     'agent': '@spinup.algos.pytorch.ED2',
-    'total_steps': 3_000_000,
+    'total_steps': 3_000_0,
     'num_test_episodes': 30,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
@@ -10,7 +10,7 @@ base_config = {
     'save_freq': 1_000_000,
     #'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'sunrise'
+        'exp_name': 'ed2'
     }
 }
 

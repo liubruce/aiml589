@@ -4,11 +4,17 @@ import scipy.signal
 import torch
 import torch.nn as nn
 
-
 def combined_shape(length, shape=None):
     if shape is None:
         return (length,)
     return (length, shape) if np.isscalar(shape) else (length, *shape)
+
+# def mlp(hidden_sizes, activation, trainable=True, name=None):
+#     """Creates MLP with the specified parameters."""
+#     return tf.keras.Sequential([
+#         tf.keras.layers.Dense(size, activation=activation, trainable=trainable)
+#         for size in hidden_sizes
+#     ], name)
 
 def mlp(sizes, activation, output_activation=nn.Identity):
     layers = []
@@ -45,18 +51,22 @@ class MLPQFunction(nn.Module):
 class MLPActorCritic(nn.Module):
 
     def __init__(self, observation_space, action_space, hidden_sizes=(256,256),
-                 activation=nn.ReLU):
+                 activation=nn.ReLU, ac_number=5):
         super().__init__()
 
         obs_dim = observation_space.shape[0]
         act_dim = action_space.shape[0]
         act_limit = action_space.high[0]
+        self.L_qf1, self.L_qf2, self.L_policy = [], [], []
 
-        # build policy and value functions
-        self.pi = MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
-        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
-        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
+        for _ in range(ac_number):
+
+            # build policy and value functions
+            self.L_policy.append(MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit))
+            self.L_qf1.append(MLPQFunction(obs_dim, act_dim, hidden_sizes, activation))
+            self.L_qf2.append(MLPQFunction(obs_dim, act_dim, hidden_sizes, activation))
 
     def act(self, obs):
         with torch.no_grad():
             return self.pi(obs).numpy()
+

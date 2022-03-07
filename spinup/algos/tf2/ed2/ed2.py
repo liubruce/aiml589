@@ -323,7 +323,6 @@ def ed2(
     def behavioural_policy(obs, ac_idx, use_noise):
         obs = tf.broadcast_to(obs, [ac_number, 1, *obs.shape])
         mu, pi = actor(obs)
-        print('mu, pi are ', mu, pi)
         if use_noise:
             return pi[ac_idx, 0]
         else:

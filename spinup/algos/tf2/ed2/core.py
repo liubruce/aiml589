@@ -62,10 +62,7 @@ class MLPActorCriticFactory:
         obs_inputs = tf.keras.Input(shape=(None, self._obs_dim),
                                     batch_size=self._ac_number)
         mus, pis = [], []
-        i = 0
         for obs_input in tf.unstack(obs_inputs, axis=0):
-            print('i is ', i)
-            i = i +1
             model = self._make_actor()
             mu, pi = model(obs_input)
             mus.append(mu)

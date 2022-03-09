@@ -10,7 +10,7 @@ base_config = {
     'save_freq': 1_000_000,
     #'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'ed2'
+        'exp_name': 'ed2_torch'
     }
 }
 

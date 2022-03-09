@@ -5,4 +5,4 @@ while read alg; do
       echo "show: $alg $problem ..."
   done < problems.txt
   echo "$alg"
-done < algorithms.txt
+done < algorithms.txt:

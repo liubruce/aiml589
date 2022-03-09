@@ -29,8 +29,8 @@ else
         echo "Save some information that may be of use to them"
         echo "Here's LOCAL TMP "
         ls -la /local/tmp
-        echo "AND LOCAL TMP FRED "
-        ls -la /local/tmp/fred
+        echo "AND LOCAL TMP liuguoq "
+        ls -la /local/tmp/liuguoq
         echo "Exiting"
         exit 1
 fi

@@ -55,7 +55,7 @@ ls -la
 #
 # Note that we need the full path to this utility, as it is not on the PATH
 #
-algorithmName="specs\${1}.py"
+algorithmName='specs\'${1}'.py'
 problemName=$2
 pyName="run.py"
 cd ./aiml589

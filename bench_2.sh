@@ -62,7 +62,7 @@ pyName="run.py"
 cd ./aiml589
 #/vol/grid-solar/sgeusers/liuguoq/anaconda3/envs/mujoco/bin/python run.py specs/td3_on_mujoco.py
 # ./bench_run.sh
-python $pyName 'specs\\'$algorithmName $problemName $SGE_TASK_ID
+python $pyName $algorithmName $problemName $SGE_TASK_ID
 #
 echo ==AND NOW, HAVING DONE SOMTHING USEFUL AND CREATED SOME OUTPUT==
 #ls -la

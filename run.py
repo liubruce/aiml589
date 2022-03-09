@@ -86,7 +86,7 @@ def main():
     parser.add_argument("task_id")
     args = parser.parse_args()
     vars_ = dict()
-    with open(args.config) as f:
+    with open("specs\\" + args.config) as f:
         exec(f.read(), vars_)
     # params_grid = skl_ms.ParameterGrid(vars_['params_grid'])
     # for idx, params in enumerate(params_grid):

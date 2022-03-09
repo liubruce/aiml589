@@ -55,14 +55,14 @@ ls -la
 #
 # Note that we need the full path to this utility, as it is not on the PATH
 #
-algorithmName='specs\'${1}'.py'
+algorithmName=${1}'.py'
 echo $algorithmName
 problemName=$2
 pyName="run.py"
 cd ./aiml589
 #/vol/grid-solar/sgeusers/liuguoq/anaconda3/envs/mujoco/bin/python run.py specs/td3_on_mujoco.py
 # ./bench_run.sh
-python $pyName $algorithmName $problemName $SGE_TASK_ID
+python $pyName 'specs\'$algorithmName $problemName $SGE_TASK_ID
 #
 echo ==AND NOW, HAVING DONE SOMTHING USEFUL AND CREATED SOME OUTPUT==
 #ls -la

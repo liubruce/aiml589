@@ -21,8 +21,8 @@
 #$ -M brucelgq.liu@gmail.com
 #$ -m be
 #
-if [ -d /local/tmp/liuguoq/$JOB_ID ]; then
-        cd /local/tmp/liuguoq/$JOB_ID
+if [ -d /local/tmp/liuguoq/$JOB_ID.$SGE_TASK_ID ]; then
+        cd /local/tmp/liuguoq/$JOB_ID.$SGE_TASK_ID
 else
         echo "Uh oh ! There's no job directory to change into "
         echo "Something is broken. I should inform the programmers"

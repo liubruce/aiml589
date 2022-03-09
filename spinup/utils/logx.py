@@ -69,7 +69,7 @@ class Logger:
                 should give them all the same ``exp_name``.)
         """
         if proc_id()==0:
-            self.output_dir = output_dir or f'./out/{time.time():.0f}'
+            self.output_dir = output_dir or f'./out/'
             if osp.exists(self.output_dir):
                 print("Warning: Log dir %s already exists! Storing info there anyway."%self.output_dir)
             else:

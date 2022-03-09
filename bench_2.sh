@@ -71,7 +71,7 @@ echo ==AND NOW, HAVING DONE SOMTHING USEFUL AND CREATED SOME OUTPUT==
 #  (really should check that directory exists too, but this is just a test)
 #
 mkdir -p /vol/grid-solar/sgeusers/liuguoq/results/$1/$problemName/$JOB_ID.$SGE_TASK_ID
-cp -r ./out/ /vol/grid-solar/sgeusers/liuguoq/results/$1/$problemName/$JOB_ID.$SGE_TASK_ID
+cp -r ./out/* /vol/grid-solar/sgeusers/liuguoq/results/$1/$problemName/$JOB_ID.$SGE_TASK_ID
 rm -r ./out
 #
 echo "Ran through OK"

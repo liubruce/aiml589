@@ -3,6 +3,7 @@ import scipy.signal
 
 import torch
 import torch.nn as nn
+from torch.nn.functional import normalize
 
 def combined_shape(length, shape=None):
     if shape is None:
@@ -30,13 +31,21 @@ class MLPActor(nn.Module):
 
     def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit):
         super().__init__()
-        pi_sizes = [obs_dim] + list(hidden_sizes) + [act_dim]
-        self.pi = mlp(pi_sizes, activation, nn.Tanh)
+        pi_sizes = [obs_dim] + list(hidden_sizes)
+        self.pi = mlp(pi_sizes, activation, nn.ReLU)
+        # print('list(hidden_sizes)[len(hidden_sizes)-1] is ', list(hidden_sizes)[len(hidden_sizes)-1])
+        self.last_linear = nn.Linear(list(hidden_sizes)[len(hidden_sizes)-1], act_dim)
         self.act_limit = act_limit
 
     def forward(self, obs):
         # Return output from network scaled to action space limits.
-        return self.act_limit * self.pi(obs)
+        mu = self.pi(obs)
+        mu = self.last_linear(mu)
+        # Normalize the actions
+        mu = normalize(mu, p=1.0, dim=0)
+
+        m_tanh = nn.Tanh()
+        return self.act_limit * m_tanh(mu)
 
 class MLPQFunction(nn.Module):
 

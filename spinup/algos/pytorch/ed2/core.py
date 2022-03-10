@@ -34,15 +34,15 @@ class MLPActor(nn.Module):
         pi_sizes = [obs_dim] + list(hidden_sizes)
         self.pi = mlp(pi_sizes, activation, nn.ReLU)
         # print('list(hidden_sizes)[len(hidden_sizes)-1] is ', list(hidden_sizes)[len(hidden_sizes)-1])
-        self.last_linear = nn.Linear(list(hidden_sizes)[len(hidden_sizes)-1], act_dim)
+        self.last_layer = nn.Linear(list(hidden_sizes)[len(hidden_sizes)-1], act_dim)
         self.act_limit = act_limit
 
     def forward(self, obs):
         # Return output from network scaled to action space limits.
         mu = self.pi(obs)
-        mu = self.last_linear(mu)
+        mu = self.last_layer(mu)
         # Normalize the actions
-        mu = normalize(mu, p=1.0, dim=0)
+        mu = normalize(mu, p=2.0, dim=0)
 
         m_tanh = nn.Tanh()
         return self.act_limit * m_tanh(mu)

@@ -118,7 +118,7 @@ def ed2(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         logger_kwargs=dict(), save_freq=10_000,  ac_number=5,
         init_ere_coeff=0.995,  train_intensity=1, use_noise_for_exploration=False,
         use_vote_policy=False,
-        log_every=10_000,
+        log_every=10_000,save_path=None,
         ):
     """
     Twin Delayed Deep Deterministic Policy Gradient (TD3)

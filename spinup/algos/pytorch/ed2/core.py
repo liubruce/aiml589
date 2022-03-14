@@ -42,7 +42,7 @@ class MLPActor(nn.Module):
         mu = self.pi(obs)
         mu = self.last_layer(mu)
         # Normalize the actions
-        mu = normalize(mu, p=2.0, dim=0)
+        # mu = normalize(mu, p=2.0, dim=0)
 
         m_tanh = nn.Tanh()
         return self.act_limit * m_tanh(mu)
@@ -59,7 +59,7 @@ class MLPQFunction(nn.Module):
 
 class MLPActorCritic(nn.Module):
 
-    def __init__(self, observation_space, action_space, hidden_sizes=(256,256),
+    def __init__(self, observation_space, action_space,prior_weight, hidden_sizes=(256,256),
                  activation=nn.ReLU, ac_number=5):
         super().__init__()
 

@@ -5,10 +5,10 @@ base_config = {
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',
-        #'prior_weight': 0.0
+        'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
-    #'save_path': './out/checkpoint',
+    'save_path': './out/checkpoint',
     'logger_kwargs': {
         'exp_name': 'ed2_torch'
     }

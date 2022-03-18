@@ -1,9 +1,7 @@
-from copy import deepcopy
 import itertools
 import numpy as np
 import torch
 from torch.optim import Adam
-import gym
 import time
 import spinup.algos.pytorch.ed2.core as core
 from spinup.utils.logx import EpochLogger
@@ -107,76 +105,85 @@ class ReplayBuffer:
             self.ere_coeff = self.init_ere_coeff * imprv_rate + (1 - imprv_rate)
 
 
-def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=0,
-        steps_per_epoch=4000, total_steps=1_000_000,
-        replay_size=int(1e6), gamma=0.99,
-        polyak=0.995, pi_lr=3e-4, q_lr=3e-4, batch_size=256, start_steps=10_000,
-        update_after=1000, update_every=50, act_noise=0.29, target_noise=0.2,
-        noise_clip=0.5, num_test_episodes=10, max_ep_len=1000,
-        logger_kwargs=dict(), save_freq=10_000,  ac_number=5,
-        init_ere_coeff=0.995,  train_intensity=1, use_noise_for_exploration=False,
-        use_vote_policy=False,
-        log_every=10_000, save_path=None,
+def ed2(env_fn,
+    actor_critic=core.MLPActorCriticFactory,
+    ac_kwargs=None,
+    ac_number=5,
+    steps_per_epoch=4000,
+    total_steps=1_000_000,
+    replay_size=1_000_000,
+    init_ere_coeff=0.995,
+    gamma=0.99,
+    polyak=0.995,
+    lr=3e-4,
+    batch_size=256,
+    start_steps=10_000,
+    update_after=1_000,
+    update_every=50,
+    train_intensity=1,
+    act_noise=0.29,
+    use_noise_for_exploration=False,
+    use_vote_policy=False,
+    max_ep_len=1_000,
+    num_test_episodes=10,
+    logger_kwargs=None,
+    log_every=10_000,
+    save_freq=10_000,
+    save_path=None,
+    trace_rate=None,
+    seed=0,
         ):
-    """
-    Twin Delayed Deep Deterministic Policy Gradient (TD3)
-
+    """Ensemble Deep Deterministic Policy Gradients.
 
     Args:
         env_fn : A function which creates a copy of the environment.
             The environment must satisfy the OpenAI Gym API.
 
-        actor_critic: The constructor method for a PyTorch Module with an ``act`` 
-            method, a ``pi`` module, a ``q1`` module, and a ``q2`` module.
-            The ``act`` method and ``pi`` module should accept batches of 
-            observations as inputs, and ``q1`` and ``q2`` should accept a batch 
-            of observations and a batch of actions as inputs. When called, 
-            these should return:
+        actor_critic: A function which takes in `action_space` kwargs
+            and returns actor and critic tf.keras.Model-s.
 
-            ===========  ================  ======================================
-            Call         Output Shape      Description
-            ===========  ================  ======================================
-            ``act``      (batch, act_dim)  | Numpy array of actions for each 
-                                           | observation.
-            ``pi``       (batch, act_dim)  | Tensor containing actions from policy
-                                           | given observations.
-            ``q1``       (batch,)          | Tensor containing one current estimate
-                                           | of Q* for the provided observations
-                                           | and actions. (Critical: make sure to
-                                           | flatten this!)
-            ``q2``       (batch,)          | Tensor containing the other current 
-                                           | estimate of Q* for the provided observations
-                                           | and actions. (Critical: make sure to
-                                           | flatten this!)
-            ===========  ================  ======================================
+            Actor should take an observation in and output:
+            ===========  ================  =====================================
+            Symbol       Shape             Description
+            ===========  ================  =====================================
+            ``pi``       (batch, act_dim)  | Deterministically computes actions
+                                           | from policy given states.
+            ===========  ================  =====================================
 
-        ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object 
-            you provided to TD3.
+            Critic should take an observation and action in and output:
+            ===========  ================  =====================================
+            Symbol       Shape             Description
+            ===========  ================  =====================================
+            ``q``        (batch,)          | Gives the current estimate of Q*
+                                           | state and action in the input.
+            ===========  ================  =====================================
 
-        seed (int): Seed for random number generators.
+        ac_kwargs (dict): Any kwargs appropriate for the actor_critic
+            function you provided to the agent.
 
-        steps_per_epoch (int): Number of steps of interaction (state-action pairs) 
-            for the agent and the environment in each epoch.
+        ac_number (int): Number of the actor-critic models in the ensemble.
 
-        epochs (int): Number of epochs to run and train agent.
+        total_steps (int): Number of environment interactions to run and train
+            the agent.
 
         replay_size (int): Maximum length of replay buffer.
 
+        init_ere_coeff (float): How much emphasis we put on recent data.
+            Always between 0 and 1, where 1 is uniform sampling.
+
         gamma (float): Discount factor. (Always between 0 and 1.)
 
-        polyak (float): Interpolation factor in polyak averaging for target 
-            networks. Target networks are updated towards main networks 
+        polyak (float): Interpolation factor in polyak averaging for target
+            networks. Target networks are updated towards main networks
             according to:
 
-            .. math:: \\theta_{\\text{targ}} \\leftarrow 
+            .. math:: \\theta_{\\text{targ}} \\leftarrow
                 \\rho \\theta_{\\text{targ}} + (1-\\rho) \\theta
 
-            where :math:`\\rho` is polyak. (Always between 0 and 1, usually 
-            close to 1.)
+            where :math:`\\rho` is polyak. (Always between 0 and 1, usually
+            close to 1.).
 
-        pi_lr (float): Learning rate for policy.
-
-        q_lr (float): Learning rate for Q-networks.
+        lr (float): Learning rate (used for both policy and value learning).
 
         batch_size (int): Minibatch size for SGD.
 
@@ -188,21 +195,21 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
             is full enough for useful updates.
 
         update_every (int): Number of env interactions that should elapse
-            between gradient descent updates. Note: Regardless of how long 
-            you wait between updates, the ratio of env steps to gradient steps 
-            is locked to 1.
+            between gradient descent updates. Note: Regardless of how long
+            you wait between updates, the ratio of env steps to gradient steps
+            is locked to 1 / `train_intensity`.
 
-        act_noise (float): Stddev for Gaussian exploration noise added to 
-            policy at training time. (At test time, no noise is added.)
+        train_intensity (float): Number of gradient steps per each env step (see
+            `update_every` docstring).
 
-        target_noise (float): Stddev for smoothing noise added to target 
-            policy.
+        act_noise (float): Stddev for Gaussian exploration noise added to
+            policy at training time (for exploration and smoothing).
 
-        noise_clip (float): Limit for absolute value of target policy 
-            smoothing noise.
+        use_noise_for_exploration (bool): If the noise should be added to the
+            behaviour policy.
 
-        policy_delay (int): Policy will only be updated once every 
-            policy_delay times for each update of the Q-networks.
+        use_vote_policy (bool): If true use vote_policy during evaluation
+            instead of default mean_policy.
 
         num_test_episodes (int): Number of episodes to test the deterministic
             policy at the end of each epoch.
@@ -211,9 +218,19 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
 
         logger_kwargs (dict): Keyword args for EpochLogger.
 
-        save_freq (int): How often (in terms of gap between epochs) to save
+        log_every (int): Number of environment interactions that should elapse
+            between dumping logs.
+
+        save_freq (int): How often (in terms of environment iterations) to save
             the current policy and value function.
 
+        save_path (str): The path specifying where to save the trained actor
+            model. Setting the value to None turns off the saving.
+
+        trace_rate (float): Fraction of episodes to trace, or None if traces
+            shouldn't be saved.
+
+        seed (int): Seed for random number generators.
     """
 
     logger = EpochLogger(**logger_kwargs)
@@ -244,7 +261,6 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
     # Create actor-critic module and target networks
     ac_factory = actor_critic(**ac_kwargs)
     actor = ac_factory.make_actor()
-
     critic1 = ac_factory.make_critic()
     critic2 = ac_factory.make_critic()
 
@@ -261,25 +277,6 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
     target_critic2.load_state_dict(critic2.state_dict())
 
 
-
-    # pi_optimizers = []
-    # q_optimizers = []
-    # q_params = []
-    # for i in range(ac_number):
-    #     # Freeze target networks with respect to optimizers (only update via polyak averaging)
-    #     for p in ac_targ.L_qf1[i].parameters():
-    #         p.requires_grad = False
-    #     for p in ac_targ.L_qf2[i].parameters():
-    #         p.requires_grad = False
-    #     for p in ac_targ.L_policy[i].parameters():
-    #         p.requires_grad = False
-    #     # List of parameters for both Q-networks (save this for convenience)
-    #     q_param = itertools.chain(ac.L_qf1[i].parameters(), ac.L_qf2[i].parameters())
-    #     # Set up optimizers for policy and q-function
-    #     pi_optimizers.append(Adam(ac.L_policy[i].parameters(), lr=pi_lr))
-    #     q_optimizers.append(Adam(q_param, lr=q_lr))
-    #     q_params.append(q_param)
-
     # Experience buffer
     replay_buffer = ReplayBuffer(obs_dim=obs_dim,
                                  act_dim=act_dim,
@@ -293,8 +290,8 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
 
     # Separate train ops for pi, q
     # optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-    pi_optimizer = Adam(actor.parameters(), lr=pi_lr)
-    q_optimizer = Adam(critic_variables, lr=q_lr)
+    pi_optimizer = Adam(actor.parameters(), lr=lr)
+    q_optimizer = Adam(critic_variables, lr=lr)
 
     def vote_evaluation_policy(obs):
         obs_actor = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
@@ -322,6 +319,15 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
         evaluation_policy = vote_evaluation_policy
     else:
         evaluation_policy = mean_evaluation_policy
+
+    def behavioural_policy(obs, ac_idx, use_noise):
+        obs = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
+        mu, pi = actor(torch.from_numpy(obs).float())
+        if use_noise:
+            return pi[ac_idx, 0].detach().numpy()
+        else:
+            return mu[ac_idx, 0].detach().numpy()
+
 
     def learn_on_batch(obs1, obs2, acts, rews, done):
         mu, _ = actor(obs1)
@@ -373,7 +379,7 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
         )
 
     def test_agent():
-        for j in range(num_test_episodes):
+        for _ in range(num_test_episodes):
             o, d, ep_ret, ep_len, task_ret = test_env.reset(), False, 0, 0, 0
             while not(d or (ep_len == max_ep_len)):
                 o, r, d, info = test_env.step(
@@ -382,15 +388,6 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
                 ep_len += 1
                 task_ret += info.get('reward_task', 0)
 
-                # Take deterministic actions at test time (noise_scale=0)
-                # actions = []
-                # for k in range(ac_number):
-                #   actions.append(ac.L_policy[k](torch.as_tensor(o, dtype=torch.float32)))
-                # mean = torch.mean(torch.stack(actions), dim=0)
-                # o, r, d, _ = test_env.step(mean.detach().numpy())
-                # ep_ret += r
-                # ep_len += 1
-                # task_ret += info.get('reward_task', 0)
             logger.store(TestEpRet=ep_ret,
                          TestEpLen=ep_len,
                          TestTaskRet=task_ret,
@@ -400,18 +397,6 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
         # tracer.on_episode_begin(env, o, epoch)
         actor_idx = np.random.choice(ac_number)  # Select policy
         return o, ep_ret, ep_len, task_ret, actor_idx
-
-    def behavioural_policy(obs, ac_idx, use_noise):
-        obs = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
-        # print('The shape of obs is ', obs.shape)
-        mu, pi = actor(torch.from_numpy(obs).float())
-        if use_noise:
-            return pi[ac_idx, 0].detach().numpy()
-        else:
-            return mu[ac_idx, 0].detach().numpy()
-        # return ac.L_policy[ac_idx](torch.as_tensor(obs, dtype=torch.float32)).detach().numpy()
-
-
 
     # Prepare for interaction with environment
     # total_steps = steps_per_epoch * epochs
@@ -516,23 +501,3 @@ def ed2(env_fn, actor_critic=core.MLPActorCriticFactory, ac_kwargs=dict(), seed=
         if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
             if save_path is not None:
                 torch.save(actor.state_dict(), save_path)
-
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
-    parser.add_argument('--hid', type=int, default=256)
-    parser.add_argument('--l', type=int, default=2)
-    parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--seed', '-s', type=int, default=0)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--exp_name', type=str, default='td3')
-    args = parser.parse_args()
-
-    from spinup.utils.run_utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
-
-    ed2(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic,
-        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
-        gamma=args.gamma, seed=args.seed, epochs=args.epochs,
-        logger_kwargs=logger_kwargs)

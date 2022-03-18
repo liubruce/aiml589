@@ -41,28 +41,37 @@ class MLPActor(nn.Module):
         self.last_layer = nn.Linear(list(hidden_sizes)[len(hidden_sizes) - 1], act_dim)
         self._act_scale = act_limit
         self._act_noise = act_noise
+        self.device = "cpu"
 
     def forward(self, obs):
         # Return output from network scaled to action space limits.
         mu = self.pi(obs)
         mu = self.last_layer(mu)
+
         # Normalize the actions
-        # mu = normalize(mu, p=2.0, dim=0)
-        # print('mu', mu.shape)
-        # Normalize the actions.
+        abs_mean = torch.abs(mu)
+        K = torch.tensor(mu.size()[1]).to(self.device)
+        Gs = torch.sum(abs_mean, dim=1).view(-1, 1)  ######
+        Gs = Gs / K
+        # Gs = Gs / beta
+        ones = torch.ones(Gs.size()).to(self.device)
+        Gs_mod1 = torch.where(Gs >= 1, Gs, ones)
+        mu = mu / Gs_mod1
+
         # g = torch.mean(torch.abs(mu), dim=0)
         # print('The shape of g ', g.shape)
         # g = torch.maximum(g, torch.ones_like(g))
         # print('mu', mu.shape, g.shape)
         # mu = mu / g
-        mu = normalize(mu, p=1.0, dim=0)
+        # print('before normalize mu ', mu.shape,mu)
+        # mu = normalize(mu, p=1.0, dim=0)
+        # print('after normalize mu ', mu.shape,mu)
         # print('mu', mu.shape)
         # Add the action noise
         pi = mu + self._act_noise * torch.empty(mu.shape).normal_()
-        m_tanh = nn.Tanh()
         # Put the actions in the limit.
-        mu = m_tanh(mu) * self._act_scale
-        pi = m_tanh(pi) * self._act_scale
+        mu = torch.tanh(mu) * self._act_scale
+        pi = torch.tanh(pi) * self._act_scale
         # print('mu and pi', mu.shape, pi.shape)
         return mu, pi
 

@@ -2,6 +2,9 @@ base_config = {
     'agent': '@spinup.algos.pytorch.EG',
     'total_steps': 3_000_00,
     'num_test_episodes': 30,
+    # 'update_every': 100,
+    # 'update_after': 100,
+    # 'log_every': 200,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',

@@ -1,23 +1,6 @@
 import numpy as np
-import scipy.signal
-
 import torch
 import torch.nn as nn
-from torch.nn.functional import normalize
-
-
-def combined_shape(length, shape=None):
-    if shape is None:
-        return (length,)
-    return (length, shape) if np.isscalar(shape) else (length, *shape)
-
-
-# def mlp(hidden_sizes, activation, trainable=True, name=None):
-#     """Creates MLP with the specified parameters."""
-#     return tf.keras.Sequential([
-#         tf.keras.layers.Dense(size, activation=activation, trainable=trainable)
-#         for size in hidden_sizes
-#     ], name)
 
 def mlp(sizes, activation, output_activation=nn.Identity):
     layers = []

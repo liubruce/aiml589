@@ -112,6 +112,20 @@ def flat_grad(y, x, retain_graph=False, create_graph=False):
     parameter = torch.cat([t.view(-1) for t in x])
     return g, parameter
 
+def layer_parameters(actors):
+    for index, actor in enumerate(actors.net_list):
+        for idx, m in enumerate(actor.modules()):
+            if type(m) == nn.Linear:
+                print('input:', m.in_features)
+                # for p in m.parameters():
+                for n_index in range(m.out_features):
+                    print(m.weight[n_index].size())
+                # for sub_idx, sub_m in enumerate(m.modules()):
+                #     print(sub_idx, '->', sub_m)
+        # for p in actor.parameters():
+        #   print('parameters:',p.numel(), p.size())
+            #     print(sub_idx, '->', sub_m)
+        return 0
 
 def apply_update(actors, grad_flattened, alphas):
     for index, actor in enumerate(actors.net_list):
@@ -122,6 +136,40 @@ def apply_update(actors, grad_flattened, alphas):
             p.data -= alphas[index] * g
             n += numel
 
+
+def compute_ensemble_g(actors, k_optimizer, k_vector, m_n_matrix, param_list):
+    for index, actor in enumerate(actors.net_list):
+        actor.pi[0].weight
+        actor.pi[0].weight.grad
+
+    ensemble_g = torch.matmul(k_vector, m_n_matrix)
+    # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
+    g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
+    # print(' The norm is ', g_l2_norm)
+    # if g_l2_norm > 0.01 or count > 5000 or np.isnan(g_l2_norm):
+    #     print('When break, The norm is ', g_l2_norm, count)
+    #     if np.isnan(g_l2_norm):
+    #         print('nan ', k_vector, m_n_matrix)
+    #     break
+    alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
+    alphas = []
+    alphas.append(torch.tensor(1.0))
+    loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
+    for i in range(1, len(m_n_matrix), 1):
+        alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
+        alpha = alpha_numerator / alpha_denominator
+        alphas.append(torch.from_numpy(alpha.detach().numpy()))
+        # print('alpha_numerator is', alpha_numerator)
+        loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha * ensemble_g)
+    alphas = torch.stack(alphas)
+    # alphas.requires_grad = False
+    k_optimizer.zero_grad()
+    # loss_k = - torch.sum(torch.FloatTensor(loss_ks))
+    loss_ks = -loss_ks
+    # print('loss is ', loss_ks)
+    # exit(0)
+    loss_ks.backward()
+    k_optimizer.step()
 
 def eg(env_fn,
         actor_critic=core.MLPActorCriticFactory,
@@ -278,6 +326,10 @@ def eg(env_fn,
     # Create actor-critic module and target networks
     ac_factory = actor_critic(**ac_kwargs)
     actor = ac_factory.make_actor()
+
+    layer_parameters(actor)
+    exit(0)
+
     critic1 = ac_factory.make_critic()
     critic2 = ac_factory.make_critic()
 

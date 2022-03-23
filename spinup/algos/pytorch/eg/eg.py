@@ -349,21 +349,18 @@ def eg(env_fn,
         for index, one_actor in enumerate(actor.net_list):
             parameters = list(one_actor.parameters())
             g, param = flat_grad(loss, parameters, retain_graph=True)
-            # print('param lenght', index, param.numel())
             param_list.append(torch.from_numpy(param.detach().numpy()))
             m_n_matrix.append(g)
-            # print('The L2 norm without sqrt of g', index, LA.norm(g, ord=2)**2)
         m_n_matrix = torch.stack(m_n_matrix)
+        u,s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
+        m_n_matrix = u @ vh
+        m_n_matrix = torch.from_numpy(m_n_matrix)
         param_list = torch.stack(param_list)
-        # print(len(m_n_matrix))
-        # print(m_n_matrix.size(),m_n_matrix.T.size())
-        k_vector = torch.rand(len(m_n_matrix), requires_grad=True)
-        # normal variance, 0, reasonal 0.001
-        # print('k vector', k_vector)
-        # m_n_matrix
+        k_vector = torch.normal(0, 0.01, size=(len(m_n_matrix),))
         k_optimizer = Adam([k_vector], lr=lr)
         m_n_matrix.requires_grad = False
         param_list.requires_grad = False
+        k_vector.requires_grad = True
         # print(loss_k)
 
         count = 0

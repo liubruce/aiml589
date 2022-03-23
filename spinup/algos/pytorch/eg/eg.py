@@ -358,7 +358,9 @@ def eg(env_fn,
         # print(len(m_n_matrix))
         # print(m_n_matrix.size(),m_n_matrix.T.size())
         k_vector = torch.rand(len(m_n_matrix), requires_grad=True)
+        # normal variance, 0, reasonal 0.001
         # print('k vector', k_vector)
+        # m_n_matrix
         k_optimizer = Adam([k_vector], lr=lr)
         m_n_matrix.requires_grad = False
         param_list.requires_grad = False
@@ -370,9 +372,12 @@ def eg(env_fn,
         while True:
             ensemble_g = torch.matmul(k_vector, m_n_matrix)
             # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
-            g_l2_norm = LA.norm(ensemble_g.detach().numpy() , ord=2) ** 2
+            g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64) , ord=2) ** 2
             # print(' The norm is ', g_l2_norm)
-            if g_l2_norm > 0.01 or count > 100000:
+            if g_l2_norm > 0.01 or count > 5000 or np.isnan(g_l2_norm):
+                print('When break, The norm is ', g_l2_norm, count)
+                if np.isnan(g_l2_norm):
+                    print('nan ', k_vector, m_n_matrix)
                 break
             alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
             alphas = []
@@ -385,7 +390,7 @@ def eg(env_fn,
                 # print('alpha_numerator is', alpha_numerator)
                 loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha *ensemble_g)
             alphas = torch.stack(alphas)
-            alphas.requires_grad = False
+            # alphas.requires_grad = False
             k_optimizer.zero_grad()
             # loss_k = - torch.sum(torch.FloatTensor(loss_ks))
             loss_ks = -loss_ks
@@ -411,7 +416,7 @@ def eg(env_fn,
         mu, _ = actor(obs1)
         q_pi = critic1(obs1, mu)
         # print('q_pi shape ', obs1.shape, q_pi.shape, q_pi)
-        pi_loss = - torch.mean(q_pi)
+        pi_loss = -torch.mean(q_pi)
         # print('pi_loss is ', pi_loss)
         # Critic update.
         q1 = critic1(obs1, acts)
@@ -470,7 +475,6 @@ def eg(env_fn,
         )
 
     def test_agent():
-        # print('test agent enter ')
         for _ in range(num_test_episodes):
             o, d, ep_ret, ep_len, task_ret = test_env.reset(), False, 0, 0, 0
             while not (d or (ep_len == max_ep_len)):

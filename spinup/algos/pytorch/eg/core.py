@@ -69,13 +69,35 @@ class MLPQFunction(nn.Module):
         q = self.q(torch.cat([obs, act], dim=-1))
         return torch.squeeze(q, -1)  # Critical to ensure q has right shape.
 
+@torch.no_grad()
+def init_weights(actors, act_noise):
+    init_params = []
+    for index, actor in enumerate(actors):
+        m_count = 0
+        for m in actor.modules():
+            if type(m) == nn.Linear:
+                if index == 0:
+                    mu, sigma = 0, 0.1  # mean and standard deviation
+                    s = torch.from_numpy(np.random.normal(mu, sigma, m.weight.size()).astype('float32'))
+                    # print(m.weight.dtype)
+                    m.weight = torch.nn.Parameter(s, requires_grad=True)
+                    # print(m.weight.dtype)
+                    # print('init size', m.weight.size(), s.size())
+                    init_params.append(s)
+                else:
+                    noise = act_noise * torch.empty(m.weight.size()).normal_(mean=0, std=0.001)
+                    weight_noise = init_params[m_count] + noise
+                    # print('noise', noise.size(), weight_noise.size())
+                    m.weight = torch.nn.Parameter(weight_noise, requires_grad=True)
+                    # print(m.weight.dtype)
+                m_count += 1
 
 class EnsembleActor(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit, ac_number, act_noise):
         super(EnsembleActor, self).__init__()
         self.net_list = nn.ModuleList(
             [MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit, act_noise) for _ in range(ac_number)])
-
+        init_weights(self.net_list, act_noise)
 
     def _heads(self, obs_inputs):
         mus, pis = [], []

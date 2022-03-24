@@ -7,6 +7,8 @@ import spinup.algos.pytorch.eg.core as core
 from spinup.utils.logx import EpochLogger
 import torch.nn as nn
 from numpy import linalg as LA
+from spinup.env import continuous_cartpole as cartpole
+
 
 class ReplayBuffer:
     """A simple FIFO experience replay buffer with ERE."""
@@ -103,6 +105,7 @@ class ReplayBuffer:
 
             self.ere_coeff = self.init_ere_coeff * imprv_rate + (1 - imprv_rate)
 
+
 def flat_grad(y, x, retain_graph=False, create_graph=False):
     if create_graph:
         retain_graph = True
@@ -112,64 +115,95 @@ def flat_grad(y, x, retain_graph=False, create_graph=False):
     parameter = torch.cat([t.view(-1) for t in x])
     return g, parameter
 
-def layer_parameters(actors):
-    for index, actor in enumerate(actors.net_list):
-        for idx, m in enumerate(actor.modules()):
-            if type(m) == nn.Linear:
-                print('input:', m.in_features)
-                # for p in m.parameters():
-                for n_index in range(m.out_features):
-                    print(m.weight[n_index].size())
-                # for sub_idx, sub_m in enumerate(m.modules()):
-                #     print(sub_idx, '->', sub_m)
-        # for p in actor.parameters():
-        #   print('parameters:',p.numel(), p.size())
-            #     print(sub_idx, '->', sub_m)
-        return 0
 
-def apply_update(actors, grad_flattened, alphas):
-    for index, actor in enumerate(actors.net_list):
-        n = 0
-        for p in actor.parameters():
-            numel = p.numel()
-            g = grad_flattened[n:n + numel].view(p.shape)
-            p.data -= alphas[index] * g
-            n += numel
-
-
-def compute_ensemble_g(actors, k_optimizer, k_vector, m_n_matrix, param_list):
-    for index, actor in enumerate(actors.net_list):
-        actor.pi[0].weight
-        actor.pi[0].weight.grad
-
-    ensemble_g = torch.matmul(k_vector, m_n_matrix)
-    # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
-    g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
-    # print(' The norm is ', g_l2_norm)
-    # if g_l2_norm > 0.01 or count > 5000 or np.isnan(g_l2_norm):
-    #     print('When break, The norm is ', g_l2_norm, count)
-    #     if np.isnan(g_l2_norm):
-    #         print('nan ', k_vector, m_n_matrix)
-    #     break
-    alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
+def compute_ensemble_g(g_matrix, param_matrix, lr):
+    m_n_matrix = torch.stack(g_matrix)
+    param_list = torch.stack(param_matrix)
+    u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
+    m_n_matrix = u @ vh
+    m_n_matrix = torch.from_numpy(m_n_matrix)
+    k_vector = torch.normal(0, 0.01, size=(len(m_n_matrix),))
+    m_n_matrix.requires_grad = False
+    param_list.requires_grad = False
+    k_vector.requires_grad = True
+    k_optimizer = Adam([k_vector], lr=lr)
+    count = 0
     alphas = []
-    alphas.append(torch.tensor(1.0))
-    loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
-    for i in range(1, len(m_n_matrix), 1):
-        alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
-        alpha = alpha_numerator / alpha_denominator
-        alphas.append(torch.from_numpy(alpha.detach().numpy()))
-        # print('alpha_numerator is', alpha_numerator)
-        loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha * ensemble_g)
-    alphas = torch.stack(alphas)
-    # alphas.requires_grad = False
-    k_optimizer.zero_grad()
-    # loss_k = - torch.sum(torch.FloatTensor(loss_ks))
-    loss_ks = -loss_ks
-    # print('loss is ', loss_ks)
-    # exit(0)
-    loss_ks.backward()
-    k_optimizer.step()
+    while True:
+        ensemble_g = torch.matmul(k_vector, m_n_matrix)
+        # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
+        g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
+        # print(' The norm is ', g_l2_norm)
+        if g_l2_norm > 0.01 or count > 2000 or np.isnan(g_l2_norm):
+            # print('When break, The norm is ', g_l2_norm, count)
+            # exit(0)
+            if np.isnan(g_l2_norm):
+                print('nan ', k_vector, m_n_matrix)
+            break
+        alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
+        alphas = []
+        alphas.append(torch.tensor(1.0))
+        loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
+        for i in range(1, len(m_n_matrix), 1):
+            alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
+            alpha = alpha_numerator / alpha_denominator
+            alphas.append(alpha)
+            # print('alpha_numerator is', alpha_numerator)
+            loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha * ensemble_g)
+        alphas = torch.stack(alphas)
+        k_optimizer.zero_grad()
+        loss_ks = -loss_ks
+        loss_ks.backward()
+        k_optimizer.step()
+        count += 1
+    return torch.matmul(k_vector, m_n_matrix), alphas
+
+def apply_update(actor, grad_flattened, index_layer, start, end ):
+    n = 0
+    for index, p in enumerate(actor.parameters()):
+        if index_layer == index:
+            p.data[start-n:end-n] -= grad_flattened
+        numel = p.numel()
+        # g = grad_flattened[n:n + numel].view(p.shape)
+
+        # n += numel
+
+def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=True): #  k_vector, m_n_matrix
+    # print('sizes is ', sizes)
+    n = 0
+    index_layer = 0
+    num_actors = len(actors.net_list)
+    def partial_update():
+        m_n_matrix = []
+        params = []
+        for index_actor in range(num_actors):
+            g = grad_flattened[index_actor][n:n + numel].view(numel)
+            param = param_list[index_actor][n:n + numel].view(numel)
+            m_n_matrix.append(g)
+            params.append(torch.from_numpy(param.detach().numpy()))
+        if new_method:
+            part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
+            for index_actor in range(num_actors):
+                param_list[index_actor][n:n + numel] -= lr * alphas[index_actor] * part_g
+        else:
+            for index_actor in range(num_actors):
+                param_list[index_actor][n:n + numel] -= lr * grad_flattened[index_actor][n:n + numel].view(numel)
+
+
+    for j in range(len(sizes) - 1):
+        numel = sizes[j]
+        for _ in range(sizes[j + 1]):
+            # update wights
+            partial_update()
+            n += numel
+        numel = sizes[j + 1]
+        # update bias
+        partial_update()
+        n += numel
+        index_layer += 2
+    # print('The final n is ', n)
+    # return ensemble_g
+
 
 def eg(env_fn,
         actor_critic=core.MLPActorCriticFactory,
@@ -304,8 +338,10 @@ def eg(env_fn,
 
     torch.manual_seed(seed)
     np.random.seed(seed)
-
     env, test_env = env_fn(), env_fn()
+
+    # env_fn = cartpole.ContinuousCartPoleEnv()
+    # env, test_env = env_fn, env_fn
 
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
@@ -327,8 +363,9 @@ def eg(env_fn,
     ac_factory = actor_critic(**ac_kwargs)
     actor = ac_factory.make_actor()
 
-    layer_parameters(actor)
-    exit(0)
+    pi_sizes = [obs_dim] + list(ac_kwargs["hidden_sizes"]) + [act_dim]
+    # layer_parameters(actor, pi_sizes)
+    # exit(0)
 
     critic1 = ac_factory.make_critic()
     critic2 = ac_factory.make_critic()
@@ -395,70 +432,17 @@ def eg(env_fn,
         else:
             return mu[ac_idx, 0].detach().numpy()
 
-    def compute_gradient(loss):
+    def update_pi(loss):
         m_n_matrix = []
         param_list = []
         for index, one_actor in enumerate(actor.net_list):
             parameters = list(one_actor.parameters())
             g, param = flat_grad(loss, parameters, retain_graph=True)
-            param_list.append(torch.from_numpy(param.detach().numpy()))
+            param_list.append(param)
             m_n_matrix.append(g)
         m_n_matrix = torch.stack(m_n_matrix)
-        u,s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
-        m_n_matrix = u @ vh
-        m_n_matrix = torch.from_numpy(m_n_matrix)
         param_list = torch.stack(param_list)
-        k_vector = torch.normal(0, 0.01, size=(len(m_n_matrix),))
-        k_optimizer = Adam([k_vector], lr=lr)
-        m_n_matrix.requires_grad = False
-        param_list.requires_grad = False
-        k_vector.requires_grad = True
-        # print(loss_k)
-
-        count = 0
-        # print(' before The norm is ', g_l2_norm)
-        alphas = []
-        while True:
-            ensemble_g = torch.matmul(k_vector, m_n_matrix)
-            # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
-            g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64) , ord=2) ** 2
-            # print(' The norm is ', g_l2_norm)
-            if g_l2_norm > 0.01 or count > 5000 or np.isnan(g_l2_norm):
-                print('When break, The norm is ', g_l2_norm, count)
-                if np.isnan(g_l2_norm):
-                    print('nan ', k_vector, m_n_matrix)
-                break
-            alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
-            alphas = []
-            alphas.append(torch.tensor(1.0))
-            loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
-            for i in range(1, len(m_n_matrix), 1):
-                alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g -param_list[i]))
-                alpha = alpha_numerator/alpha_denominator
-                alphas.append(torch.from_numpy(alpha.detach().numpy()))
-                # print('alpha_numerator is', alpha_numerator)
-                loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha *ensemble_g)
-            alphas = torch.stack(alphas)
-            # alphas.requires_grad = False
-            k_optimizer.zero_grad()
-            # loss_k = - torch.sum(torch.FloatTensor(loss_ks))
-            loss_ks = -loss_ks
-            # print('loss is ', loss_ks)
-            # exit(0)
-            loss_ks.backward()
-            k_optimizer.step()
-            # ensemble_g = np.matmul(k_vector.detach().numpy(), m_n_matrix)
-            # g_l2_norm = LA.norm(ensemble_g, ord=2) ** 2
-            count += 1
-        # print('final', count, g_l2_norm, ensemble_g.size())
-        # print(alphas)
-        # exit(0)
-
-        return ensemble_g, alphas
-        # m_m_matrix = np.matmul(m_n_matrix, k_matrix)
-        # print(m_m_matrix)
-        # print(m_m_matrix.size())
-        # torch.Size([5, 10, 3, 4])
+        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, False)
 
 
     def learn_on_batch(obs1, obs2, acts, rews, done):
@@ -483,22 +467,32 @@ def eg(env_fn,
         q1_loss = ((q_backup - q1) ** 2).mean()
         q2_loss = ((q_backup - q2) ** 2).mean()
         value_loss = (q1_loss + q2_loss) * 0.5
+
+
+        #
         # pi_optimizer.zero_grad()
-        # print('before,', actor)
-        # print('before,',actor.net_list[0].last_layer.weight.grad)
-        # for p in actor.parameters():
-        #     print(p.data.shape)
-        #     print('------------------')
-        # pi_loss.backward()
-        # print('after,')
-        # for p in actor.net_list:
-        #     print(p.pi[2 ].weight.grad)
-        #     print('------------------')
-        # pi_optimizer.step()
-        g_ensemble, alphas = compute_gradient(pi_loss)
-        apply_update(actor, g_ensemble, alphas)
-        # print('g_ensemble size ', g_ensemble.size())
         # exit(0)
+        # pi_loss.backward()
+        for index, one_actor in enumerate(actor.net_list):
+            parameters = list(one_actor.parameters())
+            g = torch.autograd.grad(pi_loss, parameters, retain_graph=True, create_graph=False)
+            # print(g)
+            if index == 0:
+                print(g)
+                print(one_actor.pi[0].weight)
+            # exit(0)
+        pi_optimizer.zero_grad()
+        pi_loss.backward()
+        for index, one_actor in enumerate(actor.net_list):
+            if index == 0:
+                print(one_actor.pi[0].weight.grad)
+                print(one_actor.pi[0].weight)
+
+        exit(0)
+        pi_optimizer.step()
+        # update_pi(pi_loss)
+
+
         q_optimizer.zero_grad()
         value_loss.backward()
         q_optimizer.step()

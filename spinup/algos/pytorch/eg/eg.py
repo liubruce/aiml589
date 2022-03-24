@@ -158,22 +158,46 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         count += 1
     return torch.matmul(k_vector, m_n_matrix), alphas
 
-def apply_update(actor, grad_flattened, index_layer, start, end ):
-    n = 0
-    for index, p in enumerate(actor.parameters()):
-        if index_layer == index:
-            p.data[start-n:end-n] -= grad_flattened
-        numel = p.numel()
-        # g = grad_flattened[n:n + numel].view(p.shape)
-
-        # n += numel
+def apply_update(actors, layer_grads, index_layer, node_index, lr ):
+    for index_actor, actor in enumerate(actors.net_list):
+        n = 0
+        for idx, m in enumerate(actor.modules()):
+            if type(m) == nn.Linear:
+                # m.weight.grad = layer_grads[index_actor]
+                if index_layer == n:
+                    m.weight.grad = layer_grads[index_actor]
+                    # print('weight ', m.weight.size(), layer_grads[index_actor].size(), index_layer, n)
+                n += 1
+                if index_layer == n:
+                    m.bias.grad = layer_grads[index_actor]
+                    # print('bias ', m.bias.size(), layer_grads[index_actor].size(), index_layer, n)
+                n += 1
+                # return 0
+    # for index, p in enumerate(actor.parameters()):
+    #     numel = p.numel()
+    #     if index_layer == index: # and start < (n + numel) and end < (n + numel):
+    #         # p.data[start-n:end-n] -= grad_flattened
+    #         # if index_layer > 1: exit(0)
+    #         if node_index == -1: # bias
+    #             # print('n is ', n, index_layer, numel, p.data.size())
+    #             tmp = 1
+    #             # p.data -= grad_flattened
+    #         else:
+    #             # print('n is ', n , start, end, index_layer, numel, start-n,end-n, len(p.data[node_index]), p.data.size())
+    #             if index_layer == 0 and node_index == 0:
+    #                 print(p.data[node_index])
+    #                 print(grad_flattened)
+    #                 print(grad_flattened * lr)
+    #                 # p.data[node_index] = p.data[node_index] - grad_flattened * lr
+    #                 print(p.data[node_index].detach().numpy() - (grad_flattened * lr).detach().numpy())
+    #             # exit(0)
+    #         return 0
+    #     # numel = p.numel()
+    #     n += numel
 
 def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=True): #  k_vector, m_n_matrix
     # print('sizes is ', sizes)
-    n = 0
-    index_layer = 0
-    num_actors = len(actors.net_list)
-    def partial_update():
+    def partial_update(node_index):
         m_n_matrix = []
         params = []
         for index_actor in range(num_actors):
@@ -184,23 +208,51 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
         if new_method:
             part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
             for index_actor in range(num_actors):
-                param_list[index_actor][n:n + numel] -= lr * alphas[index_actor] * part_g
+                # param_list[index_actor][n:n + numel] -= lr * alphas[index_actor] * part_g
+                apply_update(actors.net_list[index_actor], alphas[index_actor] * part_g, index_layer, node_index, lr)
         else:
+            grads = []
             for index_actor in range(num_actors):
-                param_list[index_actor][n:n + numel] -= lr * grad_flattened[index_actor][n:n + numel].view(numel)
+                grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
+            return grads
+                # if index_actor == 0:
+                #     apply_update(actors.net_list[index_actor], grad_flattened[index_actor][n:n + numel].view(numel), index_layer, node_index, lr)
+                # param_list[index_actor][n:n + numel] -= lr * grad_flattened[index_actor][n:n + numel].view(numel)
 
+
+    n = 0
+    index_layer = 0
+    num_actors = len(actors.net_list)
 
     for j in range(len(sizes) - 1):
+        layer_grads = []
+        for index_actor in range(num_actors):
+            layer_grads.append([])
         numel = sizes[j]
-        for _ in range(sizes[j + 1]):
+        for node_index in range(sizes[j + 1]):
             # update wights
-            partial_update()
+            # if node_index == 0:
+            #     layer_grads = partial_update(node_index)
+            #     # print('init is ', layer_grads)
+            # else:
+            tmp_grads = partial_update(node_index)
+            for tmp_index in range(len(tmp_grads)):
+                layer_grads[tmp_index].append(tmp_grads[tmp_index])
+                    # print(y)
+                # exit(0)
             n += numel
+        for index_actor in range(num_actors):
+            layer_grads[index_actor] = torch.stack(layer_grads[index_actor])
+        # print(layer_grads[0].size())
+        apply_update(actors,layer_grads, index_layer, None, None)
+        # exit(0)
         numel = sizes[j + 1]
         # update bias
-        partial_update()
+        index_layer += 1
+        tmp_grads = partial_update(-1)
+        apply_update(actors, tmp_grads, index_layer, None, None)
         n += numel
-        index_layer += 2
+        index_layer += 1
     # print('The final n is ', n)
     # return ensemble_g
 
@@ -443,6 +495,7 @@ def eg(env_fn,
         m_n_matrix = torch.stack(m_n_matrix)
         param_list = torch.stack(param_list)
         layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, False)
+        # exit(0)
 
 
     def learn_on_batch(obs1, obs2, acts, rews, done):
@@ -473,24 +526,34 @@ def eg(env_fn,
         # pi_optimizer.zero_grad()
         # exit(0)
         # pi_loss.backward()
-        for index, one_actor in enumerate(actor.net_list):
-            parameters = list(one_actor.parameters())
-            g = torch.autograd.grad(pi_loss, parameters, retain_graph=True, create_graph=False)
-            # print(g)
-            if index == 0:
-                print(g)
-                print(one_actor.pi[0].weight)
+        # for index, one_actor in enumerate(actor.net_list):
+        #     parameters = list(one_actor.parameters())
+        #     g = torch.autograd.grad(pi_loss, parameters, retain_graph=True, create_graph=False)
+        #     # print(g)
+        #     if index == 0:
+        #         print(g)
+        #         print(one_actor.pi[0].weight)
             # exit(0)
-        pi_optimizer.zero_grad()
-        pi_loss.backward()
-        for index, one_actor in enumerate(actor.net_list):
-            if index == 0:
-                print(one_actor.pi[0].weight.grad)
-                print(one_actor.pi[0].weight)
-
-        exit(0)
+        update_pi(pi_loss)
         pi_optimizer.step()
-        # update_pi(pi_loss)
+
+        # pi_optimizer.zero_grad()
+        # pi_loss.backward()
+        # for index, one_actor in enumerate(actor.net_list):
+        #     if index == 0:
+        #         print(one_actor.pi[0].weight.grad)
+        #         print(one_actor.pi[0].weight)
+        #         print(one_actor.pi[0].bias.grad)
+        #         print(one_actor.pi[0].bias)
+        #
+        # # exit(0)
+        # pi_optimizer.step()
+        # for index, one_actor in enumerate(actor.net_list):
+        #     if index == 0:
+        #         print('grad=', one_actor.pi[0].weight.grad)
+        #         print(one_actor.pi[0].weight)
+        #
+        # exit(0)
 
 
         q_optimizer.zero_grad()

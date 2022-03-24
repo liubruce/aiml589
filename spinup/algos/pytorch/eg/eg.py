@@ -133,8 +133,8 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         ensemble_g = torch.matmul(k_vector, m_n_matrix)
         # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
         g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
-        # print(' The norm is ', g_l2_norm)
-        if g_l2_norm > 0.01 or count > 2000 or np.isnan(g_l2_norm):
+
+        if g_l2_norm > 0.01 or count > 1000 or np.isnan(g_l2_norm):
             # print('When break, The norm is ', g_l2_norm, count)
             # exit(0)
             if np.isnan(g_l2_norm):
@@ -155,6 +155,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         loss_ks = -loss_ks
         loss_ks.backward()
         k_optimizer.step()
+        # print(' The norm is ', g_l2_norm, loss_ks, k_vector)
         count += 1
     return torch.matmul(k_vector, m_n_matrix), alphas
 
@@ -206,14 +207,19 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
             m_n_matrix.append(g)
             params.append(torch.from_numpy(param.detach().numpy()))
         if new_method:
+            grads = []
             part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
             for index_actor in range(num_actors):
-                # param_list[index_actor][n:n + numel] -= lr * alphas[index_actor] * part_g
-                apply_update(actors.net_list[index_actor], alphas[index_actor] * part_g, index_layer, node_index, lr)
+                grads.append(-part_g * alphas[index_actor])
+            # print(part_g, grads, alphas)
+            # exit(0)
+            return grads
         else:
             grads = []
             for index_actor in range(num_actors):
                 grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
+            print(grads)
+            exit(0)
             return grads
                 # if index_actor == 0:
                 #     apply_update(actors.net_list[index_actor], grad_flattened[index_actor][n:n + numel].view(numel), index_layer, node_index, lr)
@@ -494,7 +500,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         m_n_matrix = torch.stack(m_n_matrix)
         param_list = torch.stack(param_list)
-        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, False)
+        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, True)
         # exit(0)
 
 

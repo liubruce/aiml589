@@ -122,7 +122,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
     u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
     m_n_matrix = u @ vh
     m_n_matrix = torch.from_numpy(m_n_matrix)
-    k_vector = torch.normal(0, 0.01, size=(len(m_n_matrix),))
+    k_vector = torch.normal(0, 0.001, size=(len(m_n_matrix),))
     m_n_matrix.requires_grad = False
     param_list.requires_grad = False
     k_vector.requires_grad = True
@@ -204,7 +204,7 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
         for index_actor in range(num_actors):
             g = grad_flattened[index_actor][n:n + numel].view(numel)
             param = param_list[index_actor][n:n + numel].view(numel)
-            m_n_matrix.append(g)
+            m_n_matrix.append(-g)
             params.append(torch.from_numpy(param.detach().numpy()))
         if new_method:
             grads = []

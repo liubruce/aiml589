@@ -122,7 +122,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
     u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
     m_n_matrix = u @ vh
     m_n_matrix = torch.from_numpy(m_n_matrix)
-    k_vector = torch.normal(0, 0.001, size=(len(m_n_matrix),))
+    k_vector = torch.normal(0, 0.0000001, size=(len(m_n_matrix),))
     m_n_matrix.requires_grad = False
     param_list.requires_grad = False
     k_vector.requires_grad = True
@@ -134,7 +134,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
         g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
 
-        if g_l2_norm > 0.01 or count > 1000 or np.isnan(g_l2_norm):
+        if g_l2_norm > 0.00001 or count > 1000 or np.isnan(g_l2_norm):
             # print('When break, The norm is ', g_l2_norm, count)
             # exit(0)
             if np.isnan(g_l2_norm):
@@ -173,28 +173,7 @@ def apply_update(actors, layer_grads, index_layer, node_index, lr ):
                     m.bias.grad = layer_grads[index_actor]
                     # print('bias ', m.bias.size(), layer_grads[index_actor].size(), index_layer, n)
                 n += 1
-                # return 0
-    # for index, p in enumerate(actor.parameters()):
-    #     numel = p.numel()
-    #     if index_layer == index: # and start < (n + numel) and end < (n + numel):
-    #         # p.data[start-n:end-n] -= grad_flattened
-    #         # if index_layer > 1: exit(0)
-    #         if node_index == -1: # bias
-    #             # print('n is ', n, index_layer, numel, p.data.size())
-    #             tmp = 1
-    #             # p.data -= grad_flattened
-    #         else:
-    #             # print('n is ', n , start, end, index_layer, numel, start-n,end-n, len(p.data[node_index]), p.data.size())
-    #             if index_layer == 0 and node_index == 0:
-    #                 print(p.data[node_index])
-    #                 print(grad_flattened)
-    #                 print(grad_flattened * lr)
-    #                 # p.data[node_index] = p.data[node_index] - grad_flattened * lr
-    #                 print(p.data[node_index].detach().numpy() - (grad_flattened * lr).detach().numpy())
-    #             # exit(0)
-    #         return 0
-    #     # numel = p.numel()
-    #     n += numel
+
 
 def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=True): #  k_vector, m_n_matrix
     # print('sizes is ', sizes)
@@ -203,6 +182,8 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
         params = []
         for index_actor in range(num_actors):
             g = grad_flattened[index_actor][n:n + numel].view(numel)
+            # g_norm = LA.norm(np.asarray(g, dtype=np.float64), ord=2) ** 2
+            # print('g_norm is ', g_norm)
             param = param_list[index_actor][n:n + numel].view(numel)
             m_n_matrix.append(-g)
             params.append(torch.from_numpy(param.detach().numpy()))
@@ -218,8 +199,8 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
             grads = []
             for index_actor in range(num_actors):
                 grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
-            print(grads)
-            exit(0)
+            # print(grads)
+            # exit(0)
             return grads
                 # if index_actor == 0:
                 #     apply_update(actors.net_list[index_actor], grad_flattened[index_actor][n:n + numel].view(numel), index_layer, node_index, lr)
@@ -259,6 +240,7 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
         apply_update(actors, tmp_grads, index_layer, None, None)
         n += numel
         index_layer += 1
+    # exit(0)
     # print('The final n is ', n)
     # return ensemble_g
 

@@ -648,7 +648,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

@@ -285,7 +285,7 @@ def eg(env_fn,
         save_path=None,
         trace_rate=None,
         seed=0,
-
+        gradient_method= METHOD_EG,
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -482,14 +482,14 @@ def eg(env_fn,
         obs = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
         mu, pi = actor(torch.from_numpy(obs).float())
         if use_noise:
-            a = pi[ac_idx, 0].detach().numpy()
+            return pi[ac_idx, 0].detach().numpy()
         else:
-            a = mu[ac_idx, 0].detach().numpy()
+            return mu[ac_idx, 0].detach().numpy()
         # a = ac.act(torch.as_tensor(o, dtype=torch.float32))
         # act_noise=0.1,
-        noise_scale = 0.1 # same with td3
-        a += noise_scale * np.random.randn(act_dim)
-        return np.clip(a, -act_limit, act_limit)
+        # noise_scale = 0.1 # same with td3
+        # a += noise_scale * np.random.randn(act_dim)
+        # return np.clip(a, -act_limit, act_limit)
 
 
 
@@ -503,7 +503,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         m_n_matrix = torch.stack(m_n_matrix)
         param_list = torch.stack(param_list)
-        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, METHOD_EG)
+        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, gradient_method)
         # exit(0)
 
 

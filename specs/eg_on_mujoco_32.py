@@ -9,14 +9,14 @@ base_config = {
     # 'train_intensity': 0.01,
     # 'log_every': 1100,
     'ac_kwargs': {
-        'hidden_sizes': [16, 16],
+        'hidden_sizes': [32, 32],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_16'
+        'exp_name': 'eg_32'
     }
 }
 

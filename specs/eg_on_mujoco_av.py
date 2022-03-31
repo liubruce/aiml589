@@ -3,20 +3,21 @@ base_config = {
     'total_steps': 3_000_000,
     'num_test_episodes': 30,
     'use_noise_for_exploration': True,
+    'gradient_method': 'average',
     # 'update_every': 500,
     # 'update_after': 100,
     # 'log_every': 200,
     # 'train_intensity': 0.01,
     # 'log_every': 1100,
     'ac_kwargs': {
-        'hidden_sizes': [16, 16],
+        'hidden_sizes': [32, 32],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_16'
+        'exp_name': 'eg_av'
     }
 }
 

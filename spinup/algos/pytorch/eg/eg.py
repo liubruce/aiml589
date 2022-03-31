@@ -683,6 +683,6 @@ def eg(env_fn,
 
             iter_time = time.time()
         # Save model
-        if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
-            if save_path is not None:
-                torch.save(actor.state_dict(), save_path)
+        # if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
+        #     if save_path is not None:
+        #         torch.save(actor.state_dict(), save_path)

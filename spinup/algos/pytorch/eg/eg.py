@@ -9,6 +9,9 @@ import torch.nn as nn
 from numpy import linalg as LA
 from spinup.env import continuous_cartpole as cartpole
 
+METHOD_ED2="ed2"
+METHOD_EG="eg"
+METHOD_AV="average"
 
 class ReplayBuffer:
     """A simple FIFO experience replay buffer with ERE."""
@@ -175,7 +178,7 @@ def apply_update(actors, layer_grads, index_layer, node_index, lr ):
                 n += 1
 
 
-def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=True): #  k_vector, m_n_matrix
+def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
     # print('sizes is ', sizes)
     def partial_update(node_index):
         m_n_matrix = []
@@ -187,7 +190,7 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
             param = param_list[index_actor][n:n + numel].view(numel)
             m_n_matrix.append(-g)
             params.append(torch.from_numpy(param.detach().numpy()))
-        if new_method:
+        if new_method == METHOD_EG:
             grads = []
             part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
             for index_actor in range(num_actors):
@@ -196,12 +199,22 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=Tr
             # exit(0)
             return grads
         else:
-            grads = []
-            for index_actor in range(num_actors):
-                grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
-            # print(grads)
-            # exit(0)
-            return grads
+            if new_method == METHOD_ED2:
+                grads = []
+                for index_actor in range(num_actors):
+                    grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
+                return grads
+            else: #average
+                grads = []
+                for index_actor in range(num_actors):
+                    grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
+                grads = torch.stack(grads)
+                # print(grads.size())
+                grad = torch.mean(grads, dim=0)
+                # print(grad, grad.size())
+                # exit(0)
+                return [grad for _ in range(num_actors)]
+
                 # if index_actor == 0:
                 #     apply_update(actors.net_list[index_actor], grad_flattened[index_actor][n:n + numel].view(numel), index_layer, node_index, lr)
                 # param_list[index_actor][n:n + numel] -= lr * grad_flattened[index_actor][n:n + numel].view(numel)
@@ -272,6 +285,7 @@ def eg(env_fn,
         save_path=None,
         trace_rate=None,
         seed=0,
+
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -385,7 +399,7 @@ def eg(env_fn,
 
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
-
+    act_limit = env.action_space.high[0]
     # This implementation assumes all dimensions share the same bound!
     assert np.all(env.action_space.high == env.action_space.high[0])
 
@@ -468,9 +482,16 @@ def eg(env_fn,
         obs = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
         mu, pi = actor(torch.from_numpy(obs).float())
         if use_noise:
-            return pi[ac_idx, 0].detach().numpy()
+            a = pi[ac_idx, 0].detach().numpy()
         else:
-            return mu[ac_idx, 0].detach().numpy()
+            a = mu[ac_idx, 0].detach().numpy()
+        # a = ac.act(torch.as_tensor(o, dtype=torch.float32))
+        # act_noise=0.1,
+        noise_scale = 0.1 # same with td3
+        a += noise_scale * np.random.randn(act_dim)
+        return np.clip(a, -act_limit, act_limit)
+
+
 
     def update_pi(loss):
         m_n_matrix = []
@@ -482,7 +503,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         m_n_matrix = torch.stack(m_n_matrix)
         param_list = torch.stack(param_list)
-        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, True)
+        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, METHOD_AV)
         # exit(0)
 
 
@@ -509,40 +530,8 @@ def eg(env_fn,
         q2_loss = ((q_backup - q2) ** 2).mean()
         value_loss = (q1_loss + q2_loss) * 0.5
 
-
-        #
-        # pi_optimizer.zero_grad()
-        # exit(0)
-        # pi_loss.backward()
-        # for index, one_actor in enumerate(actor.net_list):
-        #     parameters = list(one_actor.parameters())
-        #     g = torch.autograd.grad(pi_loss, parameters, retain_graph=True, create_graph=False)
-        #     # print(g)
-        #     if index == 0:
-        #         print(g)
-        #         print(one_actor.pi[0].weight)
-            # exit(0)
         update_pi(pi_loss)
         pi_optimizer.step()
-
-        # pi_optimizer.zero_grad()
-        # pi_loss.backward()
-        # for index, one_actor in enumerate(actor.net_list):
-        #     if index == 0:
-        #         print(one_actor.pi[0].weight.grad)
-        #         print(one_actor.pi[0].weight)
-        #         print(one_actor.pi[0].bias.grad)
-        #         print(one_actor.pi[0].bias)
-        #
-        # # exit(0)
-        # pi_optimizer.step()
-        # for index, one_actor in enumerate(actor.net_list):
-        #     if index == 0:
-        #         print('grad=', one_actor.pi[0].weight.grad)
-        #         print(one_actor.pi[0].weight)
-        #
-        # exit(0)
-
 
         q_optimizer.zero_grad()
         value_loss.backward()

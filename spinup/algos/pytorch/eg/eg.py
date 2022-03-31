@@ -503,7 +503,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         m_n_matrix = torch.stack(m_n_matrix)
         param_list = torch.stack(param_list)
-        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, METHOD_AV)
+        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, METHOD_EG)
         # exit(0)
 
 

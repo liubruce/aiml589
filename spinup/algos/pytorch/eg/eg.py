@@ -118,14 +118,28 @@ def flat_grad(y, x, retain_graph=False, create_graph=False):
     parameter = torch.cat([t.view(-1) for t in x])
     return g, parameter
 
+def cal_g_norm(g_matrix):
+    norms = []
+    for one_g in g_matrix:
+        norms.append(LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2) ** 2)
+    norm_av = np.average(norms) * 10
+    print('beta value is ', norm_av)
+    if norm_av > 0.0001:
+        norm_av = 0.0001
+    if norm_av == 0:
+        norm_av = 0.00001
+        print('bata value is 0, ', g_matrix)
+    return norm_av
+
 
 def compute_ensemble_g(g_matrix, param_matrix, lr):
+    beta = cal_g_norm(g_matrix)
     m_n_matrix = torch.stack(g_matrix)
     param_list = torch.stack(param_matrix)
     u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
     m_n_matrix = u @ vh
     m_n_matrix = torch.from_numpy(m_n_matrix)
-    k_vector = torch.normal(0, 0.0000001, size=(len(m_n_matrix),))
+    k_vector = torch.normal(0, beta/100, size=(len(m_n_matrix),))
     m_n_matrix.requires_grad = False
     param_list.requires_grad = False
     k_vector.requires_grad = True
@@ -137,8 +151,8 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
         g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
 
-        if g_l2_norm > 0.00001 or count > 1000 or np.isnan(g_l2_norm):
-            # print('When break, The norm is ', g_l2_norm, count)
+        if g_l2_norm > beta or count > 1000 or np.isnan(g_l2_norm):
+            print('When break, The norm is ', g_l2_norm, beta, count)
             # exit(0)
             if np.isnan(g_l2_norm):
                 print('nan ', k_vector, m_n_matrix)

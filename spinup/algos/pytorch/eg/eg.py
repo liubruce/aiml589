@@ -114,6 +114,17 @@ def flat_grad(y, x, retain_graph=False, create_graph=False):
         retain_graph = True
 
     g = torch.autograd.grad(y, x, retain_graph=retain_graph, create_graph=create_graph)
+    # print('g size', g)
+    # for t in g:
+    #     print(t.size())
+    # # exit(0)
+    # count = 0
+    # for t in g:
+    #     np.savetxt("GFG" + str(count) +  ".csv",
+    #                t.detach().numpy(),
+    #                delimiter=", ",
+    #                fmt='% s')
+    #     count += 1
     g = torch.cat([t.view(-1) for t in g])
     parameter = torch.cat([t.view(-1) for t in x])
     return g, parameter
@@ -123,12 +134,13 @@ def cal_g_norm(g_matrix):
     for one_g in g_matrix:
         norms.append(LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2) ** 2)
     norm_av = np.average(norms) * 10
-    print('beta value is ', norm_av)
-    if norm_av > 0.0001:
-        norm_av = 0.0001
+    # print('beta value is ', norm_av)
+    # if norm_av > 0.0001:
+    #     norm_av = 0.0001
     if norm_av == 0:
         norm_av = 0.00001
-        print('bata value is 0, ', g_matrix)
+        print('bata value is 0, ', g_matrix[0].size())
+        exit(0)
     return norm_av
 
 
@@ -152,7 +164,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
 
         if g_l2_norm > beta or count > 1000 or np.isnan(g_l2_norm):
-            print('When break, The norm is ', g_l2_norm, beta, count)
+            # print('When break, The norm is ', g_l2_norm, beta, count)
             # exit(0)
             if np.isnan(g_l2_norm):
                 print('nan ', k_vector, m_n_matrix)
@@ -192,82 +204,78 @@ def apply_update(actors, layer_grads, index_layer, node_index, lr ):
                 n += 1
 
 
-def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
-    # print('sizes is ', sizes)
-    def partial_update(node_index):
-        m_n_matrix = []
-        params = []
+def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method, lr):
+    m_n_matrix = []
+    params = []
+    for index_actor in range(num_actors):
+        g = grad_flattened[index_actor][n:n + numel].view(numel)
+        param = param_list[index_actor][n:n + numel].view(numel)
+        # g_norm = LA.norm(np.asarray(g, dtype=np.float64), ord=2) ** 2
+        # if g_norm == 0:
+        #     print(grad_flattened)
+        #     print('g_norm is zero', g, n, numel, param)
+        #     np.savetxt("GFG.csv",
+        #                grad_flattened[index_actor].detach().numpy(),
+        #                delimiter=", ",
+        #                fmt='% s')
+        #     exit(0)
+        m_n_matrix.append(-g)
+        params.append(torch.from_numpy(param.detach().numpy()))
+    if new_method == METHOD_EG:
+        grads = []
+        part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
         for index_actor in range(num_actors):
-            g = grad_flattened[index_actor][n:n + numel].view(numel)
-            # g_norm = LA.norm(np.asarray(g, dtype=np.float64), ord=2) ** 2
-            # print('g_norm is ', g_norm)
-            param = param_list[index_actor][n:n + numel].view(numel)
-            m_n_matrix.append(-g)
-            params.append(torch.from_numpy(param.detach().numpy()))
-        if new_method == METHOD_EG:
+            grads.append(-part_g * alphas[index_actor])
+        # print(part_g, grads, alphas)
+        # exit(0)
+        return grads
+    else:
+        if new_method == METHOD_ED2:
             grads = []
-            part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
             for index_actor in range(num_actors):
-                grads.append(-part_g * alphas[index_actor])
-            # print(part_g, grads, alphas)
-            # exit(0)
+                grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
             return grads
-        else:
-            if new_method == METHOD_ED2:
-                grads = []
-                for index_actor in range(num_actors):
-                    grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
-                return grads
-            else: #average
-                grads = []
-                for index_actor in range(num_actors):
-                    grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
-                grads = torch.stack(grads)
-                # print(grads.size())
-                grad = torch.mean(grads, dim=0)
-                # print(grad, grad.size())
-                # exit(0)
-                return [grad for _ in range(num_actors)]
-
-                # if index_actor == 0:
-                #     apply_update(actors.net_list[index_actor], grad_flattened[index_actor][n:n + numel].view(numel), index_layer, node_index, lr)
-                # param_list[index_actor][n:n + numel] -= lr * grad_flattened[index_actor][n:n + numel].view(numel)
+        else: #average
+            grads = []
+            for index_actor in range(num_actors):
+                grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
+            grads = torch.stack(grads)
+            # print(grads.size())
+            grad = torch.mean(grads, dim=0)
+            # print(grad, grad.size())
+            # exit(0)
+            return [grad for _ in range(num_actors)]
 
 
+def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
     n = 0
     index_layer = 0
     num_actors = len(actors.net_list)
-
     for j in range(len(sizes) - 1):
         layer_grads = []
         for index_actor in range(num_actors):
             layer_grads.append([])
-        numel = sizes[j]
-        for node_index in range(sizes[j + 1]):
-            # update wights
-            # if node_index == 0:
-            #     layer_grads = partial_update(node_index)
-            #     # print('init is ', layer_grads)
-            # else:
-            tmp_grads = partial_update(node_index)
+        numel = sizes[j+1]
+        # print('weight', sizes[j], numel)
+        for node_index in range(sizes[j]):
+            # print('update node ', node_index)
+            tmp_grads = partial_update(num_actors, n, numel, grad_flattened, param_list, new_method, lr)
             for tmp_index in range(len(tmp_grads)):
                 layer_grads[tmp_index].append(tmp_grads[tmp_index])
-                    # print(y)
-                # exit(0)
             n += numel
         for index_actor in range(num_actors):
-            layer_grads[index_actor] = torch.stack(layer_grads[index_actor])
-        # print(layer_grads[0].size())
+            layer_grads[index_actor] = torch.stack(layer_grads[index_actor]).view(sizes[j+1], sizes[j])
         apply_update(actors,layer_grads, index_layer, None, None)
-        # exit(0)
+
         numel = sizes[j + 1]
         # update bias
+        # print('bias', numel)
         index_layer += 1
-        tmp_grads = partial_update(-1)
+        tmp_grads = partial_update(num_actors, n, numel, grad_flattened, param_list, new_method, lr)
         apply_update(actors, tmp_grads, index_layer, None, None)
         n += numel
         index_layer += 1
-    # exit(0)
+
     # print('The final n is ', n)
     # return ensemble_g
 
@@ -432,6 +440,7 @@ def eg(env_fn,
     actor = ac_factory.make_actor()
 
     pi_sizes = [obs_dim] + list(ac_kwargs["hidden_sizes"]) + [act_dim]
+    # print(pi_sizes)
     # layer_parameters(actor, pi_sizes)
     # exit(0)
 
@@ -515,8 +524,8 @@ def eg(env_fn,
             g, param = flat_grad(loss, parameters, retain_graph=True)
             param_list.append(param)
             m_n_matrix.append(g)
-        m_n_matrix = torch.stack(m_n_matrix)
-        param_list = torch.stack(param_list)
+        # m_n_matrix = torch.stack(m_n_matrix)
+        # param_list = torch.stack(param_list)
         layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, gradient_method)
         # exit(0)
 

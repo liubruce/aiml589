@@ -8,6 +8,7 @@ from spinup.utils.logx import EpochLogger
 import torch.nn as nn
 from numpy import linalg as LA
 from spinup.env import continuous_cartpole as cartpole
+import math
 
 METHOD_ED2="ed2"
 METHOD_EG="eg"
@@ -118,34 +119,72 @@ def flat_grad(y, x, retain_graph=False, create_graph=False):
     # for t in g:
     #     print(t.size())
     # # exit(0)
+    # print('y is ', y)
     # count = 0
     # for t in g:
-    #     np.savetxt("GFG" + str(count) +  ".csv",
+    #     np.savetxt("gradients" + str(count) +  ".csv",
     #                t.detach().numpy(),
     #                delimiter=", ",
     #                fmt='% s')
     #     count += 1
     g = torch.cat([t.view(-1) for t in g])
     parameter = torch.cat([t.view(-1) for t in x])
+    # count = 0
+    # for t in x:
+    #     np.savetxt("parameters" + str(count) +  ".csv",
+    #                t.detach().numpy(),
+    #                delimiter=", ",
+    #                fmt='% s')
+    #     count += 1
+    # exit(0)
     return g, parameter
+
+
+def cal_distance(params):
+    num_theta = len(params)
+    for i in range(num_theta):
+        for j in range(i+1, num_theta):
+            if i != j:
+                distance = params[i]-params[j]
+                norm = LA.norm(np.asarray(distance.detach().numpy(), dtype=np.float64), ord=2) ** 2
+                print('The distance between theta' + str(i) + ' and theta_' + str(j) + ' is', norm)
+
 
 def cal_g_norm(g_matrix):
     norms = []
     for one_g in g_matrix:
-        norms.append(LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2) ** 2)
-    norm_av = np.average(norms) * 10
-    # print('beta value is ', norm_av)
+        norms.append(LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2) ) #** 2
+    norm_av = np.average(norms)
+    # print('beta value is ', norm_av, norms)
     # if norm_av > 0.0001:
     #     norm_av = 0.0001
-    if norm_av == 0:
-        norm_av = 0.00001
-        print('bata value is 0, ', g_matrix[0].size())
-        exit(0)
+    # if norm_av == 0:
+    #     norm_av = 0.00001
+    #     print('bata value is 0, ', g_matrix[0].size())
+        # exit(0)
     return norm_av
 
 
+def cal_angle(g, m_n_matrix):
+    num_g = 0
+    for index, g_i in enumerate(m_n_matrix):
+        vector_1 = g.detach().numpy()
+        vector_2 = g_i.detach().numpy()
+
+        unit_vector_1 = vector_1 / np.linalg.norm(vector_1)
+        unit_vector_2 = vector_2 / np.linalg.norm(vector_2)
+        dot_product = np.dot(unit_vector_1, unit_vector_2)
+        # print('dot_product is ', dot_product)
+        angle = np.arccos(dot_product) * 180/math.pi
+        if angle > 90:
+            # print('The angle between g and g_' + str(index) + ' is greater 90 : ', angle)
+            num_g += 1
+    return num_g / len(m_n_matrix) * 100
+
 def compute_ensemble_g(g_matrix, param_matrix, lr):
     beta = cal_g_norm(g_matrix)
+    # cal_distance(param_matrix)
+    # exit(0)
     m_n_matrix = torch.stack(g_matrix)
     param_list = torch.stack(param_matrix)
     u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
@@ -160,15 +199,25 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
     alphas = []
     while True:
         ensemble_g = torch.matmul(k_vector, m_n_matrix)
+        # print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+        # exit(0)
         # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
-        g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) ** 2
+        g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) # ** 2
 
-        if g_l2_norm > beta or count > 1000 or np.isnan(g_l2_norm):
-            # print('When break, The norm is ', g_l2_norm, beta, count)
+        if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 10000:
+            if count > 100000:
+                print('When break, The norm is ', g_l2_norm, beta, count)
+                cal_distance(param_matrix)
+                print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
             # exit(0)
             if np.isnan(g_l2_norm):
-                print('nan ', k_vector, m_n_matrix)
+                print('nan ', count, k_vector, m_n_matrix)
             break
+        if (count+1) % 10000 == 0:
+            print('The norm is ', g_l2_norm, beta, count, loss_ks)
+            print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+            cal_distance(param_matrix)
+
         alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
         alphas = []
         alphas.append(torch.tensor(1.0))
@@ -247,6 +296,7 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
             return [grad for _ in range(num_actors)]
 
 
+
 def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
     n = 0
     index_layer = 0
@@ -275,7 +325,7 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=ME
         apply_update(actors, tmp_grads, index_layer, None, None)
         n += numel
         index_layer += 1
-
+    # exit(0)
     # print('The final n is ', n)
     # return ensemble_g
 
@@ -660,7 +710,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),
@@ -673,7 +723,7 @@ def eg(env_fn,
                         f'QDiff_{idx + 1}': torch.abs(q1 - q2).detach().numpy(),
                     })
                 logger.store(**metrics)
-
+            # exit(0)
         # End of epoch handling
         if ((t + 1) % log_every == 0) or (t + 1 == total_steps):
             # Test the performance of the deterministic version of the agent.

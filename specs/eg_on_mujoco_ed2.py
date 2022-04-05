@@ -2,21 +2,22 @@ base_config = {
     'agent': '@spinup.algos.pytorch.EG',
     'total_steps': 3_000_000,
     'num_test_episodes': 30,
-    'use_noise_for_exploration': False,
-    'update_every': 500,
+    'use_noise_for_exploration': True,
+    'gradient_method': 'ed2',
+    # 'update_every': 500,
     # 'update_after': 100,
     # 'log_every': 200,
-    'train_intensity': 0.01,
-    'log_every': 1100,
+    # 'train_intensity': 0.01,
+    # 'log_every': 1100,
     'ac_kwargs': {
-        'hidden_sizes': [64, 64],
+        'hidden_sizes': [32, 32],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_64'
+        'exp_name': 'eg_ed2'
     }
 }
 

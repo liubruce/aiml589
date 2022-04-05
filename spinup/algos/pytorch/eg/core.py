@@ -72,6 +72,7 @@ class MLPQFunction(nn.Module):
 @torch.no_grad()
 def init_weights(actors, act_noise):
     init_params = []
+    init_bias = []
     for index, actor in enumerate(actors):
         m_count = 0
         for m in actor.modules():
@@ -81,23 +82,36 @@ def init_weights(actors, act_noise):
                     s = torch.from_numpy(np.random.normal(mu, sigma, m.weight.size()).astype('float32'))
                     # print(m.weight.dtype)
                     m.weight = torch.nn.Parameter(s, requires_grad=True)
-                    # print(m.weight.dtype)
+                    bias = torch.from_numpy(np.random.normal(mu, sigma, m.bias.size()).astype('float32'))
+                    m.bias = torch.nn.Parameter(bias, requires_grad=True)
+                    # print(m.weight)
                     # print('init size', m.weight.size(), s.size())
                     init_params.append(s)
+                    init_bias.append(bias)
                 else:
                     noise = act_noise * torch.empty(m.weight.size()).normal_(mean=0, std=0.001)
                     weight_noise = init_params[m_count] + noise
                     # print('noise', noise.size(), weight_noise.size())
                     m.weight = torch.nn.Parameter(weight_noise, requires_grad=True)
+                    bias_noise = act_noise * torch.empty(m.bias.size()).normal_(mean=0, std=0.001)
+                    bias_noise = init_bias[m_count] + bias_noise
+                    m.bias = torch.nn.Parameter(bias_noise, requires_grad=True)
                     # print(m.weight.dtype)
                 m_count += 1
-
+        print('The ' + str(index) + ' actor!!')
+        for p in actor.parameters():
+            print(p)
 class EnsembleActor(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit, ac_number, act_noise):
         super(EnsembleActor, self).__init__()
         self.net_list = nn.ModuleList(
             [MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit, act_noise) for _ in range(ac_number)])
-        init_weights(self.net_list, act_noise)
+        # init_weights(self.net_list, act_noise)
+        # for index, actor in enumerate(self.net_list):
+        #     print('The ' + str(index) + ' actor!!')
+        #     for p in actor.parameters():
+        #         print(p)
+        # exit(0)
 
     def _heads(self, obs_inputs):
         mus, pis = [], []

@@ -1,3 +1,4 @@
 eg_on_mujoco_av
 eg_on_mujoco_16
 eg_on_mujoco_32
+eg_on_mujoco_64

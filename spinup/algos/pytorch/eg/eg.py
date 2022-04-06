@@ -205,18 +205,18 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) # ** 2
 
         if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 10000:
-            if count > 100000:
-                print('When break, The norm is ', g_l2_norm, beta, count)
-                cal_distance(param_matrix)
-                print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+            # if count > 100000:
+            #     print('When break, The norm is ', g_l2_norm, beta, count)
+            #     cal_distance(param_matrix)
+            #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
             # exit(0)
             if np.isnan(g_l2_norm):
                 print('nan ', count, k_vector, m_n_matrix)
             break
-        if (count+1) % 10000 == 0:
-            print('The norm is ', g_l2_norm, beta, count, loss_ks)
-            print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
-            cal_distance(param_matrix)
+        # if (count+1) % 10000 == 0:
+        #     print('The norm is ', g_l2_norm, beta, count, loss_ks)
+        #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+        #     cal_distance(param_matrix)
 
         alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
         alphas = []
@@ -710,7 +710,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

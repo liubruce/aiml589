@@ -181,7 +181,7 @@ def cal_angle(g, m_n_matrix):
             num_g += 1
     return num_g / len(m_n_matrix) * 100
 
-def compute_ensemble_g(g_matrix, param_matrix, lr):
+def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=True):
     beta = cal_g_norm(g_matrix)
     # cal_distance(param_matrix)
     # exit(0)
@@ -211,7 +211,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
             #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
             # exit(0)
             if np.isnan(g_l2_norm):
-                print('nan ', count, k_vector, m_n_matrix)
+                print('nan ', count, k_vector, m_n_matrix, param_matrix)
             break
         # if (count+1) % 10000 == 0:
         #     print('The norm is ', g_l2_norm, beta, count, loss_ks)
@@ -223,8 +223,11 @@ def compute_ensemble_g(g_matrix, param_matrix, lr):
         alphas.append(torch.tensor(1.0))
         loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
         for i in range(1, len(m_n_matrix), 1):
-            alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
-            alpha = alpha_numerator / alpha_denominator
+            if alpha_constant:
+                alpha = torch.tensor(1.0)
+            else:
+                alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
+                alpha = alpha_numerator / alpha_denominator
             alphas.append(alpha)
             # print('alpha_numerator is', alpha_numerator)
             loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha * ensemble_g)
@@ -298,6 +301,7 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
 
 
 def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
+    # cal_distance(param_list)
     n = 0
     index_layer = 0
     num_actors = len(actors.net_list)
@@ -710,7 +714,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

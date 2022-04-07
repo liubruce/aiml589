@@ -9,7 +9,7 @@ base_config = {
     'train_intensity': 0.2,
     'log_every': 1100,
     'ac_kwargs': {
-        'hidden_sizes': [64, 64],
+        'hidden_sizes': [256, 256],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },

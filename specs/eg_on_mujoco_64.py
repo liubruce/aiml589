@@ -3,11 +3,12 @@ base_config = {
     'total_steps': 3_000_000,
     'num_test_episodes': 30,
     'use_noise_for_exploration': False,
-    'update_every': 50,
+    # 'update_every': 50,
     # 'update_after': 100,
     # 'log_every': 200,
-    'train_intensity': 0.2,
-    'log_every': 1100,
+    # 'train_intensity': 0.2,
+    # 'log_every': 1100,
+    'gradient_method': 'constant',
     'ac_kwargs': {
         'hidden_sizes': [64, 64],
         # 'activation': 'relu',
@@ -16,7 +17,7 @@ base_config = {
     'save_freq': 1_000_000,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_64'
+        'exp_name': 'eg_64_constant'
     }
 }
 

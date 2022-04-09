@@ -9,10 +9,12 @@ import torch.nn as nn
 from numpy import linalg as LA
 from spinup.env import continuous_cartpole as cartpole
 import math
+from spinup.utils.torch_util import get_param_list, set_param_list
 
 METHOD_ED2="ed2"
 METHOD_EG="eg"
 METHOD_AV="average"
+METHOD_ALPHA_CONSTANT ="constant"
 
 class ReplayBuffer:
     """A simple FIFO experience replay buffer with ERE."""
@@ -155,13 +157,6 @@ def cal_g_norm(g_matrix):
     for one_g in g_matrix:
         norms.append(LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2) ) #** 2
     norm_av = np.average(norms)
-    # print('beta value is ', norm_av, norms)
-    # if norm_av > 0.0001:
-    #     norm_av = 0.0001
-    # if norm_av == 0:
-    #     norm_av = 0.00001
-    #     print('bata value is 0, ', g_matrix[0].size())
-        # exit(0)
     return norm_av
 
 
@@ -181,10 +176,8 @@ def cal_angle(g, m_n_matrix):
             num_g += 1
     return num_g / len(m_n_matrix) * 100
 
-def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=True):
+def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
     beta = cal_g_norm(g_matrix)
-    # cal_distance(param_matrix)
-    # exit(0)
     m_n_matrix = torch.stack(g_matrix)
     param_list = torch.stack(param_matrix)
     u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
@@ -204,9 +197,9 @@ def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=True):
         # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
         g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) # ** 2
 
-        if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 10000:
+        if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 1000:
             # if count > 100000:
-            #     print('When break, The norm is ', g_l2_norm, beta, count)
+            # print('When break, The norm is ', g_l2_norm, beta, count)
             #     cal_distance(param_matrix)
             #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
             # exit(0)
@@ -240,7 +233,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=True):
         count += 1
     return torch.matmul(k_vector, m_n_matrix), alphas
 
-def apply_update(actors, layer_grads, index_layer, node_index, lr ):
+def apply_update(actors, layer_grads, index_layer):
     for index_actor, actor in enumerate(actors.net_list):
         n = 0
         for idx, m in enumerate(actor.modules()):
@@ -256,24 +249,22 @@ def apply_update(actors, layer_grads, index_layer, node_index, lr ):
                 n += 1
 
 
+def av_gradients(grads, num_actors):
+    grads = torch.stack(grads)
+    grad = torch.mean(grads, dim=0)
+    return [grad for _ in range(num_actors)]
+
+
 def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method, lr):
-    m_n_matrix = []
-    params = []
-    for index_actor in range(num_actors):
-        g = grad_flattened[index_actor][n:n + numel].view(numel)
-        param = param_list[index_actor][n:n + numel].view(numel)
-        # g_norm = LA.norm(np.asarray(g, dtype=np.float64), ord=2) ** 2
-        # if g_norm == 0:
-        #     print(grad_flattened)
-        #     print('g_norm is zero', g, n, numel, param)
-        #     np.savetxt("GFG.csv",
-        #                grad_flattened[index_actor].detach().numpy(),
-        #                delimiter=", ",
-        #                fmt='% s')
-        #     exit(0)
-        m_n_matrix.append(-g)
-        params.append(torch.from_numpy(param.detach().numpy()))
+
     if new_method == METHOD_EG:
+        m_n_matrix = []
+        params = []
+        for index_actor in range(num_actors):
+            g = grad_flattened[index_actor][n:n + numel].view(numel)
+            param = param_list[index_actor][n:n + numel].view(numel)
+            m_n_matrix.append(-g)
+            params.append(torch.from_numpy(param.detach().numpy()))
         grads = []
         part_g, alphas = compute_ensemble_g(m_n_matrix, params, lr)
         for index_actor in range(num_actors):
@@ -282,22 +273,28 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
         # exit(0)
         return grads
     else:
-        if new_method == METHOD_ED2:
-            grads = []
-            for index_actor in range(num_actors):
-                grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
-            return grads
-        else: #average
-            grads = []
-            for index_actor in range(num_actors):
-                grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
-            grads = torch.stack(grads)
-            # print(grads.size())
-            grad = torch.mean(grads, dim=0)
-            # print(grad, grad.size())
-            # exit(0)
-            return [grad for _ in range(num_actors)]
+        grads = []
+        for index_actor in range(num_actors):
+            grads.append(grad_flattened[index_actor][n:n + numel].view(numel))
+        return grads
+        # if new_method == METHOD_ED2:
+        #     return grads
+        # else: #average
+        #     return av_gradients(grads, num_actors)
 
+
+def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant):
+    for index in range(len(grad_flattened)):
+        grad_flattened[index] = -grad_flattened[index]
+    params = []
+    for index in range(len(param_list)):
+        params.append(torch.from_numpy(param_list[index].detach().numpy()))
+    part_g, alphas = compute_ensemble_g(grad_flattened, params, lr, alpha_constant)
+    # print('alphas are ', alphas)
+    grads = []
+    for index_actor in range(num_actors):
+        grads.append(-part_g * alphas[index_actor])
+    return grads
 
 
 def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
@@ -305,6 +302,17 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=ME
     n = 0
     index_layer = 0
     num_actors = len(actors.net_list)
+
+    if new_method == METHOD_AV:
+        grad_flattened = av_gradients(grad_flattened, num_actors)
+
+    if new_method == METHOD_ALPHA_CONSTANT:
+        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True)
+
+    if new_method == METHOD_EG:
+        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False)
+        new_method = METHOD_ALPHA_CONSTANT
+
     for j in range(len(sizes) - 1):
         layer_grads = []
         for index_actor in range(num_actors):
@@ -319,20 +327,22 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=ME
             n += numel
         for index_actor in range(num_actors):
             layer_grads[index_actor] = torch.stack(layer_grads[index_actor]).view(sizes[j+1], sizes[j])
-        apply_update(actors,layer_grads, index_layer, None, None)
+        apply_update(actors,layer_grads, index_layer)
 
         numel = sizes[j + 1]
         # update bias
         # print('bias', numel)
         index_layer += 1
         tmp_grads = partial_update(num_actors, n, numel, grad_flattened, param_list, new_method, lr)
-        apply_update(actors, tmp_grads, index_layer, None, None)
+        apply_update(actors, tmp_grads, index_layer)
         n += numel
         index_layer += 1
-    # exit(0)
-    # print('The final n is ', n)
-    # return ensemble_g
 
+
+def identical_params(models):
+    first_params = get_param_list(models.net_list[0])
+    for index in range(1, len(models.net_list)):
+        set_param_list(models.net_list[index], first_params)
 
 def eg(env_fn,
         actor_critic=core.MLPActorCriticFactory,
@@ -361,7 +371,7 @@ def eg(env_fn,
         save_path=None,
         trace_rate=None,
         seed=0,
-        gradient_method= METHOD_EG,
+        gradient_method= METHOD_ALPHA_CONSTANT,
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -492,7 +502,8 @@ def eg(env_fn,
     # Create actor-critic module and target networks
     ac_factory = actor_critic(**ac_kwargs)
     actor = ac_factory.make_actor()
-
+    if gradient_method == METHOD_AV:
+        identical_params(actor)
     pi_sizes = [obs_dim] + list(ac_kwargs["hidden_sizes"]) + [act_dim]
     # print(pi_sizes)
     # layer_parameters(actor, pi_sizes)
@@ -500,6 +511,9 @@ def eg(env_fn,
 
     critic1 = ac_factory.make_critic()
     critic2 = ac_factory.make_critic()
+    if gradient_method == METHOD_AV:
+        identical_params(critic1)
+        identical_params(critic2)
 
     critic_variables = itertools.chain(critic1.parameters(), critic2.parameters())
 
@@ -714,7 +728,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

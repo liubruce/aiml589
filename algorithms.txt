@@ -3,3 +3,4 @@ eg_on_mujoco_64_variable
 eg_on_mujoco_128
 eg_on_mujoco_256
 eg_on_mujoco_av
+eg_on_mujoco_ed2

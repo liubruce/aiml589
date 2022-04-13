@@ -69,11 +69,11 @@ class MLPQFunction(nn.Module):
         q = self.q(torch.cat([obs, act], dim=-1))
         return torch.squeeze(q, -1)  # Critical to ensure q has right shape.
 
-# @torch.no_grad()
+@torch.no_grad()
 def init_weights(m):
     if type(m) == nn.Linear:
         # if index == 0:
-        mu, sigma = 0, 0.1  # mean and standard deviation
+        mu, sigma = 0, 0.01  # mean and standard deviation
         # s = torch.from_numpy(np.random.normal(mu, sigma, m.weight.size()).astype('float32'))
         # print(m.weight.dtype)
         m.weight.data.normal_(mu, sigma)

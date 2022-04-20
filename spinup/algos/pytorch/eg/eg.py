@@ -178,75 +178,88 @@ def cal_angle(g, m_n_matrix):
 
 
 def calculate_optimal_k(beta, m_n_matrix):
-    k_vector = torch.normal(0, 0, size=(len(m_n_matrix),))
+    # k_vector = torch.normal(0, 0, size=(len(m_n_matrix),))
     w =0
     for i in range(len(m_n_matrix)):
         if i == 0:
-            w = torch.matmul(m_n_matrix[i].T,m_n_matrix)
+            w = torch.matmul(m_n_matrix[i].T,m_n_matrix.T)
         else:
-            w = w + torch.matmul(m_n_matrix[i].T,m_n_matrix)
-    print(w.size())
-    k_vector = beta * w / ((m_n_matrix @ w).T @ (m_n_matrix @ w)) ** 2
+            w = w + torch.matmul(m_n_matrix[i].T,m_n_matrix.T)
+    print(w)
+    print((m_n_matrix.T@w ).size())
+    k_vector =  beta * w / ((m_n_matrix.T @ w).T @ (m_n_matrix.T @ w)) ** 2
     print('k_vector is ', k_vector)
+    exit(0)
     return k_vector
 
 
 def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
     beta = cal_g_norm(g_matrix)
     m_n_matrix = torch.stack(g_matrix)
-    calculate_optimal_k(beta, m_n_matrix)
-    param_list = torch.stack(param_matrix)
-    u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
-    m_n_matrix = u @ vh
-    m_n_matrix = torch.from_numpy(m_n_matrix)
-    k_vector = torch.normal(0, beta/100, size=(len(m_n_matrix),))
-    m_n_matrix.requires_grad = False
-    param_list.requires_grad = False
-    k_vector.requires_grad = True
-    k_optimizer = Adam([k_vector], lr=lr)
-    count = 0
-    alphas = []
-    while True:
-        ensemble_g = torch.matmul(k_vector, m_n_matrix)
-        # print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
-        # exit(0)
-        # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
-        g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) # ** 2
-
-        if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 1000:
-            # if count > 100000:
-            # print('When break, The norm is ', g_l2_norm, beta, count)
-            #     cal_distance(param_matrix)
-            #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
-            # exit(0)
-            if np.isnan(g_l2_norm):
-                print('nan ', count, k_vector, m_n_matrix, param_matrix)
-            break
-        # if (count+1) % 10000 == 0:
-        #     print('The norm is ', g_l2_norm, beta, count, loss_ks)
-        #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
-        #     cal_distance(param_matrix)
-
-        alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
+    # print(m_n_matrix.size())
+    # exit(0)
+    if alpha_constant:
+        k_vector = calculate_optimal_k(beta, m_n_matrix)
         alphas = []
-        alphas.append(torch.tensor(1.0))
-        loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
-        for i in range(1, len(m_n_matrix), 1):
-            if alpha_constant:
-                alpha = torch.tensor(1.0)
-            else:
-                alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
-                alpha = alpha_numerator / alpha_denominator
-            alphas.append(alpha)
-            # print('alpha_numerator is', alpha_numerator)
-            loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha * ensemble_g)
-        alphas = torch.stack(alphas)
-        k_optimizer.zero_grad()
-        loss_ks = -loss_ks
-        loss_ks.backward()
-        k_optimizer.step()
-        # print(' The norm is ', g_l2_norm, loss_ks, k_vector)
-        count += 1
+        for i in range(len(m_n_matrix)):
+            alphas.append(torch.tensor(1.0))
+    else:
+        param_list = torch.stack(param_matrix)
+        u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
+        m_n_matrix = u @ vh
+        m_n_matrix = torch.from_numpy(m_n_matrix)
+        partial_beta = beta/100
+        if alpha_constant:
+            partial_beta = 0
+        k_vector = torch.normal(0, partial_beta, size=(len(m_n_matrix),))
+        m_n_matrix.requires_grad = False
+        param_list.requires_grad = False
+        k_vector.requires_grad = True
+        k_optimizer = Adam([k_vector], lr=lr)
+        count = 0
+        alphas = []
+        while True:
+            ensemble_g = torch.matmul(k_vector, m_n_matrix)
+            # print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+            # exit(0)
+            # print('alpha_denominator size is', ensemble_g.size(),alpha_denominator.size(),alpha_denominator)
+            g_l2_norm = LA.norm(np.asarray(ensemble_g.detach().numpy(), dtype=np.float64), ord=2) # ** 2
+
+            if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 1000:
+                # if count > 100000:
+                # print('When break, The norm is ', g_l2_norm, beta, count)
+                #     cal_distance(param_matrix)
+                #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+                # exit(0)
+                if np.isnan(g_l2_norm):
+                    print('nan ', count, k_vector, m_n_matrix, param_matrix)
+                break
+            # if (count+1) % 10000 == 0:
+            #     print('The norm is ', g_l2_norm, beta, count, loss_ks)
+            #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
+            #     cal_distance(param_matrix)
+
+            alpha_denominator = torch.matmul(ensemble_g.T, ensemble_g)
+            alphas = []
+            alphas.append(torch.tensor(1.0))
+            loss_ks = torch.matmul(m_n_matrix[0].T, ensemble_g)
+            for i in range(1, len(m_n_matrix), 1):
+                if alpha_constant:
+                    alpha = torch.tensor(1.0)
+                else:
+                    alpha_numerator = torch.matmul(ensemble_g.T, (param_list[0] + ensemble_g - param_list[i]))
+                    alpha = alpha_numerator / alpha_denominator
+                alphas.append(alpha)
+                # print('alpha_numerator is', alpha_numerator)
+                loss_ks = loss_ks + torch.matmul(m_n_matrix[i].T, alpha * ensemble_g)
+            alphas = torch.stack(alphas)
+            k_optimizer.zero_grad()
+            loss_ks = -loss_ks
+            loss_ks.backward()
+            k_optimizer.step()
+            # print(' The norm is ', g_l2_norm, loss_ks, k_vector)
+            count += 1
+        print('k_vector from gradient is ', k_vector)
     return torch.matmul(k_vector, m_n_matrix), alphas
 
 def apply_update(actors, layer_grads, index_layer):

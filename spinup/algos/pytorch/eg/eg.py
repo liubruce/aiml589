@@ -185,11 +185,11 @@ def calculate_optimal_k(beta, m_n_matrix):
             w = torch.matmul(m_n_matrix[i].T,m_n_matrix.T)
         else:
             w = w + torch.matmul(m_n_matrix[i].T,m_n_matrix.T)
-    print(w)
-    print((m_n_matrix.T@w ).size())
-    k_vector =  beta * w / ((m_n_matrix.T @ w).T @ (m_n_matrix.T @ w)) ** 2
-    print('k_vector is ', k_vector)
-    exit(0)
+    # print(w)
+    # print((m_n_matrix.T@w ).size())
+    k_vector =  beta * w / math.sqrt((m_n_matrix.T @ w).T @ (m_n_matrix.T @ w))
+    # print('k_vector is ', k_vector)
+    # exit(0)
     return k_vector
 
 

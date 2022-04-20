@@ -176,9 +176,25 @@ def cal_angle(g, m_n_matrix):
             num_g += 1
     return num_g / len(m_n_matrix) * 100
 
+
+def calculate_optimal_k(beta, m_n_matrix):
+    k_vector = torch.normal(0, 0, size=(len(m_n_matrix),))
+    w =0
+    for i in range(len(m_n_matrix)):
+        if i == 0:
+            w = torch.matmul(m_n_matrix[i].T,m_n_matrix)
+        else:
+            w = w + torch.matmul(m_n_matrix[i].T,m_n_matrix)
+    print(w.size())
+    k_vector = beta * w / ((m_n_matrix @ w).T @ (m_n_matrix @ w)) ** 2
+    print('k_vector is ', k_vector)
+    return k_vector
+
+
 def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
     beta = cal_g_norm(g_matrix)
     m_n_matrix = torch.stack(g_matrix)
+    calculate_optimal_k(beta, m_n_matrix)
     param_list = torch.stack(param_matrix)
     u, s, vh = np.linalg.svd(m_n_matrix, full_matrices=False)
     m_n_matrix = u @ vh
@@ -728,7 +744,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

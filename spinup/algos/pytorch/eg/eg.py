@@ -155,8 +155,12 @@ def cal_distance(params):
 def cal_g_norm(g_matrix):
     norms = []
     for one_g in g_matrix:
-        norms.append(LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2) ) #** 2
+        one_norm = LA.norm(np.asarray(one_g.detach().numpy(), dtype=np.float64), ord=2)
+        # tmp_norm = math.sqrt(one_g.detach().numpy().T @ one_g.detach().numpy())
+        # print(one_norm, tmp_norm)
+        norms.append(one_norm) #** 2
     norm_av = np.average(norms)
+    # exit(0)
     return norm_av
 
 
@@ -212,6 +216,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
         if alpha_constant:
             partial_beta = 0
         k_vector = torch.normal(0, partial_beta, size=(len(m_n_matrix),))
+        # print('initial k_vetor is ', k_vector)
         m_n_matrix.requires_grad = False
         param_list.requires_grad = False
         k_vector.requires_grad = True
@@ -227,7 +232,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
 
             if g_l2_norm > beta or np.isnan(g_l2_norm) or count > 1000:
                 # if count > 100000:
-                # print('When break, The norm is ', g_l2_norm, beta, count)
+                # print('When break, The norm is ', g_l2_norm, beta, count, k_vector)
                 #     cal_distance(param_matrix)
                 #     print('Percentage greater 90 is ', cal_angle(ensemble_g, m_n_matrix))
                 # exit(0)
@@ -259,7 +264,7 @@ def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
             k_optimizer.step()
             # print(' The norm is ', g_l2_norm, loss_ks, k_vector)
             count += 1
-        print('k_vector from gradient is ', k_vector)
+        # print('k_vector from gradient is ', k_vector, k_vector_formulation)
     return torch.matmul(k_vector, m_n_matrix), alphas
 
 def apply_update(actors, layer_grads, index_layer):
@@ -311,6 +316,9 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
         # else: #average
         #     return av_gradients(grads, num_actors)
 
+def regular_gradients(ensemble_g, param_average, param_index):
+    lamda_value = 0.001
+    return ensemble_g - lamda_value * (param_index - param_average)
 
 def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant):
     for index in range(len(grad_flattened)):
@@ -320,9 +328,18 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant)
         params.append(torch.from_numpy(param_list[index].detach().numpy()))
     part_g, alphas = compute_ensemble_g(grad_flattened, params, lr, alpha_constant)
     # print('alphas are ', alphas)
+
+    params = torch.stack(params)
+    param_average = torch.mean(params, dim=0)
+
+    # print('param_average is ', param_average.size())
+    # exit(0)
     grads = []
     for index_actor in range(num_actors):
-        grads.append(-part_g * alphas[index_actor])
+        if alpha_constant:
+            grads.append(-regular_gradients(part_g, param_average, params[index_actor]))
+        else:
+            grads.append(-part_g * alphas[index_actor])
     return grads
 
 

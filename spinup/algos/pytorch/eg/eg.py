@@ -317,7 +317,7 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
         #     return av_gradients(grads, num_actors)
 
 def regular_gradients(ensemble_g, param_average, param_index):
-    lamda_value = 0.001
+    lamda_value = 0.0000001
     return ensemble_g - lamda_value * (param_index - param_average)
 
 def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant):

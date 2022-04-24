@@ -1,3 +1,3 @@
-eg_on_mujoco_256
-eg_on_mujoco_av
-eg_on_mujoco_ed2
+eg_on_mujoco_256_0001
+eg_on_mujoco_256_00001
+eg_on_mujoco_256_000001

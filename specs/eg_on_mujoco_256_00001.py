@@ -8,6 +8,7 @@ base_config = {
     # 'log_every': 200,
     # 'train_intensity': 0.2,
     # 'log_every': 1100,
+    'lamda_value': 0.00001,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',
@@ -16,7 +17,7 @@ base_config = {
     'save_freq': 1_000_000,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_256'
+        'exp_name': 'eg_256_00001'
     }
 }
 

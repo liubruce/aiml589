@@ -316,11 +316,11 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
         # else: #average
         #     return av_gradients(grads, num_actors)
 
-def regular_gradients(ensemble_g, param_average, param_index):
-    lamda_value = 0.0000001
+def regular_gradients(ensemble_g, param_average, param_index,lamda_value ):
+    # lamda_value = 0.000001 #0.0000001
     return ensemble_g - lamda_value * (param_index - param_average)
 
-def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant):
+def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant, lamda_value):
     for index in range(len(grad_flattened)):
         grad_flattened[index] = -grad_flattened[index]
     params = []
@@ -337,13 +337,13 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant)
     grads = []
     for index_actor in range(num_actors):
         if alpha_constant:
-            grads.append(-regular_gradients(part_g, param_average, params[index_actor]))
+            grads.append(-regular_gradients(part_g, param_average, params[index_actor], lamda_value))
         else:
             grads.append(-part_g * alphas[index_actor])
     return grads
 
 
-def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=METHOD_EG): #  k_vector, m_n_matrix
+def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, new_method=METHOD_EG): #  k_vector, m_n_matrix
     # cal_distance(param_list)
     n = 0
     index_layer = 0
@@ -353,10 +353,10 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, new_method=ME
         grad_flattened = av_gradients(grad_flattened, num_actors)
 
     if new_method == METHOD_ALPHA_CONSTANT:
-        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True)
+        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True, lamda_value)
 
     if new_method == METHOD_EG:
-        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False)
+        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False, lamda_value)
         new_method = METHOD_ALPHA_CONSTANT
 
     for j in range(len(sizes) - 1):
@@ -418,6 +418,7 @@ def eg(env_fn,
         trace_rate=None,
         seed=0,
         gradient_method= METHOD_ALPHA_CONSTANT,
+        lamda_value=0.000001,
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -640,7 +641,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         # m_n_matrix = torch.stack(m_n_matrix)
         # param_list = torch.stack(param_list)
-        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, gradient_method)
+        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, lamda_value, gradient_method)
         # exit(0)
 
 
@@ -774,7 +775,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

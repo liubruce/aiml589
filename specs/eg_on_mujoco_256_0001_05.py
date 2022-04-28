@@ -18,7 +18,7 @@ base_config = {
     'save_freq': 1_000_000,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_256_0001'
+        'exp_name': 'eg_256_0001_05'
     }
 }
 

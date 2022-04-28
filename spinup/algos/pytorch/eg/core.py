@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+Init_sigma = 0.01
+
 def mlp(sizes, activation, output_activation=nn.Identity):
     layers = []
     for j in range(len(sizes) - 1):
@@ -73,7 +75,8 @@ class MLPQFunction(nn.Module):
 def init_weights(m):
     if type(m) == nn.Linear:
         # if index == 0:
-        mu, sigma = 0, 0.01  # mean and standard deviation
+        mu, sigma = 0, Init_sigma  # mean and standard deviation
+        # print('Init_sigma is', Init_sigma)
         # s = torch.from_numpy(np.random.normal(mu, sigma, m.weight.size()).astype('float32'))
         # print(m.weight.dtype)
         m.weight.data.normal_(mu, sigma)
@@ -172,7 +175,7 @@ class MLPActorCriticFactory:
     """
 
     def __init__(self, observation_space, action_space, hidden_sizes,
-                 activation, prior_weight, act_noise, ac_number):
+                 activation, prior_weight, act_noise, ac_number, init_sigma):
         self._obs_dim = observation_space.shape[0]
         self._act_dim = action_space.shape[0]
         self._act_scale = action_space.high[0]
@@ -181,7 +184,8 @@ class MLPActorCriticFactory:
         self._act_noise = act_noise
         self._ac_number = ac_number
         self._prior_weight = prior_weight
-
+        global Init_sigma
+        Init_sigma = init_sigma
 
     def make_actor(self):
         """Constructs and returns the ensemble of actor models."""

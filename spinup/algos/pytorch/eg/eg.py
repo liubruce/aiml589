@@ -419,6 +419,7 @@ def eg(env_fn,
         seed=0,
         gradient_method= METHOD_ALPHA_CONSTANT,
         lamda_value=0.000001,
+        init_sigma=0.01
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -545,6 +546,7 @@ def eg(env_fn,
     ac_kwargs['act_noise'] = act_noise
     ac_kwargs['ac_number'] = ac_number
     ac_kwargs['activation'] = nn.ReLU
+    ac_kwargs['init_sigma'] = init_sigma
 
     # Create actor-critic module and target networks
     ac_factory = actor_critic(**ac_kwargs)
@@ -775,7 +777,7 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),

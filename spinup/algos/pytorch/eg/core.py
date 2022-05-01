@@ -138,8 +138,8 @@ class EnsembleCritic(nn.Module):
         super(EnsembleCritic, self).__init__()
         self.net_list = nn.ModuleList(
             [MLPQFunction(obs_dim, act_dim, hidden_sizes, activation) for _ in range(ac_number)])
-        for index, critic in enumerate(self.net_list):
-            critic.apply(init_weights)
+        # for index, critic in enumerate(self.net_list):
+        #     critic.apply(init_weights)
 
     def _heads(self, obs_inputs, act_inputs):
         qs = []

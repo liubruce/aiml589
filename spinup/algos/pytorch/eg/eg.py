@@ -7,9 +7,9 @@ import spinup.algos.pytorch.eg.core as core
 from spinup.utils.logx import EpochLogger
 import torch.nn as nn
 from numpy import linalg as LA
-from spinup.env import continuous_cartpole as cartpole
 import math
 from spinup.utils.torch_util import get_param_list, set_param_list
+
 
 METHOD_ED2="ed2"
 METHOD_EG="eg"
@@ -142,14 +142,33 @@ def flat_grad(y, x, retain_graph=False, create_graph=False):
     return g, parameter
 
 
+def cal_distance_torch(params):
+    num_theta = len(params)
+    distances = []
+    for i in range(num_theta):
+        one_row = []
+        for j in range(num_theta):
+            if j > i:
+                distance = params[i]-params[j]
+                norm = torch.norm(distance) ** 2
+                one_row.append(norm)
+            else:
+                one_row.append(torch.tensor(0))
+        distances.append(one_row)
+    return distances
+
 def cal_distance(params):
     num_theta = len(params)
+    distances = np.zeros((num_theta, num_theta))
     for i in range(num_theta):
         for j in range(i+1, num_theta):
             if i != j:
                 distance = params[i]-params[j]
                 norm = LA.norm(np.asarray(distance.detach().numpy(), dtype=np.float64), ord=2) ** 2
-                print('The distance between theta' + str(i) + ' and theta_' + str(j) + ' is', norm)
+                distances[i][j] = norm
+                # print('The distance between theta' + str(i) + ' and theta_' + str(j) + ' is', norm)
+    # print('The distance between theta', distances)
+    return distances
 
 
 def cal_g_norm(g_matrix):
@@ -316,11 +335,61 @@ def partial_update(num_actors, n, numel, grad_flattened, param_list, new_method,
         # else: #average
         #     return av_gradients(grads, num_actors)
 
-def regular_gradients(ensemble_g, param_average, param_index,lamda_value ):
+def regular_gradients(ensemble_g, param_average, param_index,lamda_value):
     # lamda_value = 0.000001 #0.0000001
     return ensemble_g - lamda_value * (param_index - param_average)
 
-def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant, lamda_value):
+
+def regular_small_distance(ensemble_g, lamda_value, params, current_index, index_actor):
+    with torch.enable_grad():
+        param_index_actor = params[index_actor].clone().detach().requires_grad_(True)
+        param_current_index = params[current_index].clone().detach().requires_grad_(True)
+        delta_theta = torch.norm(param_index_actor-param_current_index) ** 2
+        # if delta_theta < distance_threshold:
+        print('params[current_index] is ', params[current_index])
+        tmp_grad, _ = flat_grad(delta_theta, param_current_index, retain_graph=True)
+        ensemble_g = ensemble_g + lamda_value * tmp_grad
+        print('ensemble_g is ', tmp_grad,ensemble_g)
+    return ensemble_g
+
+
+def regular_same_sphere(ensemble_g, params, num_actors, lamda_sphere):
+    # lamda_value = 0.000001 #0.0000001
+    # time_1 = time.time()
+    params_list = []
+    with torch.enable_grad():
+        for index_actor in range(num_actors):
+            params_list.append(params[index_actor].clone().detach().requires_grad_(True))
+        distances = cal_distance_torch(params_list)
+        errors = []
+        for index_actor in range(num_actors):
+            delta_theta = []
+            for i in range(num_actors):
+                if i != index_actor:
+                    delta_theta.append(distances[i][index_actor] if index_actor > i else distances[index_actor][i])
+            # print('delta_theta are', delta_theta)
+            errors.append(torch.var(torch.stack(delta_theta)))
+        grads = []
+        # print(ensemble_g)
+        # print('errors are', errors)
+        # exit(0)
+        sum_error = torch.sum(torch.stack(errors))
+        for index_actor in range(num_actors):
+            new_g = ensemble_g.clone().detach()
+            # for i in range(num_actors):
+            tmp_grad, _ = flat_grad(sum_error, params_list[index_actor], retain_graph=True)
+            new_g = new_g - lamda_sphere * tmp_grad
+            # time_2 = time.time()
+            # time_interval = time_2 - time_1
+            # print('the spend time is ', time_interval)
+            grads.append(-new_g)
+    # time_2 = time.time()
+    # time_interval = time_2 - time_1
+    # print('the spend time is ', time_interval)
+    return grads
+
+
+def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant, lamda_value, to_sphere=True):
     for index in range(len(grad_flattened)):
         grad_flattened[index] = -grad_flattened[index]
     params = []
@@ -328,23 +397,37 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
         params.append(torch.from_numpy(param_list[index].detach().numpy()))
     part_g, alphas = compute_ensemble_g(grad_flattened, params, lr, alpha_constant)
     # print('alphas are ', alphas)
+    small_distance = False
+    if to_sphere:
+        grads = regular_same_sphere(part_g, params, num_actors, 0.01)
+    else:
+        params = torch.stack(params)
+        param_average = torch.mean(params, dim=0)
+        grads = []
+        distances = cal_distance(params)
+        # print(distances)
+        dist_threshold = 1
+        dist_alpha = 0.5
+        for index_actor in range(num_actors):
+            if alpha_constant:
+                # ensemble_g = part_g
+                ensemble_g = regular_gradients(part_g, param_average, params[index_actor], lamda_value)
+                for i in range(num_actors):
+                    if i != index_actor:
+                        current_distance = distances[i][index_actor] if index_actor > i else distances[index_actor][i]
+                        if current_distance < dist_threshold:
+                            small_distance = True
+                            ensemble_g = regular_small_distance(ensemble_g, dist_alpha, params, index_actor, i)
+                grads.append(-ensemble_g)
+            else:
+                grads.append(-part_g * alphas[index_actor])
+    return grads, small_distance
 
-    params = torch.stack(params)
-    param_average = torch.mean(params, dim=0)
 
-    # print('param_average is ', param_average.size())
-    # exit(0)
-    grads = []
-    for index_actor in range(num_actors):
-        if alpha_constant:
-            grads.append(-regular_gradients(part_g, param_average, params[index_actor], lamda_value))
-        else:
-            grads.append(-part_g * alphas[index_actor])
-    return grads
-
-
-def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, new_method=METHOD_EG): #  k_vector, m_n_matrix
-    # cal_distance(param_list)
+def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, new_method=METHOD_EG, to_sphere = False): #  k_vector, m_n_matrix
+    # distances = cal_distance(param_list)
+    # print(distances)
+    small_distance = False
     n = 0
     index_layer = 0
     num_actors = len(actors.net_list)
@@ -353,10 +436,10 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, 
         grad_flattened = av_gradients(grad_flattened, num_actors)
 
     if new_method == METHOD_ALPHA_CONSTANT:
-        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True, lamda_value)
+        grad_flattened, small_distance = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True, lamda_value, to_sphere)
 
     if new_method == METHOD_EG:
-        grad_flattened = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False, lamda_value)
+        grad_flattened, small_distance = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False, lamda_value, to_sphere)
         new_method = METHOD_ALPHA_CONSTANT
 
     for j in range(len(sizes) - 1):
@@ -383,6 +466,7 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, 
         apply_update(actors, tmp_grads, index_layer)
         n += numel
         index_layer += 1
+    return small_distance
 
 
 def identical_params(models):
@@ -419,7 +503,8 @@ def eg(env_fn,
         seed=0,
         gradient_method= METHOD_ALPHA_CONSTANT,
         lamda_value=0.000001,
-        init_sigma=0.01
+        init_sigma=0.01,
+        to_sphere=False
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -643,7 +728,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         # m_n_matrix = torch.stack(m_n_matrix)
         # param_list = torch.stack(param_list)
-        layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, lamda_value, gradient_method)
+        return layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, lamda_value, gradient_method, to_sphere)
         # exit(0)
 
 
@@ -652,6 +737,15 @@ def eg(env_fn,
         q_pi = critic1(obs1, mu)
         # print('q_pi shape ', obs1.shape, q_pi.shape, q_pi)
         pi_loss = -torch.mean(q_pi)
+        # print('pi_loss is ', pi_loss)
+        if torch.isnan(pi_loss):
+            for index, one_actor in enumerate(actor.net_list):
+                parameters = list(one_actor.parameters())
+                print(index, parameters)
+            for index, one_actor in enumerate(critic1.net_list):
+                parameters = list(one_actor.parameters())
+                print(index, parameters)
+            exit(0)
         # print('pi_loss is ', pi_loss)
         # Critic update.
         q1 = critic1(obs1, acts)
@@ -670,7 +764,7 @@ def eg(env_fn,
         q2_loss = ((q_backup - q2) ** 2).mean()
         value_loss = (q1_loss + q2_loss) * 0.5
 
-        update_pi(pi_loss)
+        small_distance = update_pi(pi_loss)
         pi_optimizer.step()
 
         q_optimizer.zero_grad()
@@ -695,6 +789,7 @@ def eg(env_fn,
             q2_loss=q2_loss,
             q1=q1,
             q2=q2,
+            small_distance=small_distance
         )
 
     def test_agent():
@@ -777,11 +872,13 @@ def eg(env_fn,
                         (n + 1) * 1000 / number_of_updates))
                 batch = replay_buffer.sample_batch(batch_size, most_recent)
                 results = learn_on_batch(**batch)
-                # print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
+                print('after learn_on_batch, the pi_loss is ', results['pi_loss'].detach().numpy(), t)
                 metrics = dict(EREcoeff=replay_buffer.ere_coeff,
                                LossPi=results['pi_loss'].detach().numpy(),
                                LossQ1=results['q1_loss'].detach().numpy(),
-                               LossQ2=results['q2_loss'].detach().numpy())
+                               LossQ2=results['q2_loss'].detach().numpy(),
+                               S_Dist=results['small_distance'],
+                               )
                 for idx, (q1, q2) in enumerate(
                         zip(results['q1'], results['q2'])):
                     metrics.update({

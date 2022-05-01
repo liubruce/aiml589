@@ -379,6 +379,8 @@ def regular_same_sphere(ensemble_g, params, num_actors, lamda_sphere):
             # for i in range(num_actors):
             tmp_grad, _ = flat_grad(sum_error, params_list[index_actor], retain_graph=True)
             new_g = new_g - lamda_sphere * tmp_grad
+            # print('new_g is ', new_g)
+            # print('tmp_grad is ', lamda_sphere * tmp_grad, tmp_grad)
             # time_2 = time.time()
             # time_interval = time_2 - time_1
             # print('the spend time is ', time_interval)
@@ -399,7 +401,7 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
     # print('alphas are ', alphas)
     small_distance = False
     if to_sphere:
-        grads = regular_same_sphere(part_g, params, num_actors, 0.01)
+        grads = regular_same_sphere(part_g, params, num_actors, 0.1)
     else:
         params = torch.stack(params)
         param_average = torch.mean(params, dim=0)

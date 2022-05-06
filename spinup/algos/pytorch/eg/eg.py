@@ -222,7 +222,13 @@ def compute_ensemble_g(g_matrix, param_matrix, lr, alpha_constant=False):
     # print(m_n_matrix.size())
     # exit(0)
     if alpha_constant:
+        if beta < 1e-6:
+            print('m_n_matrix is ', m_n_matrix)
+            print('param_matrix is ', param_matrix)
+            print('beta is ', beta)
+            exit(0)
         k_vector = calculate_optimal_k(beta, m_n_matrix)
+
         alphas = []
         for i in range(len(m_n_matrix)):
             alphas.append(torch.tensor(1.0))
@@ -370,24 +376,14 @@ def regular_same_sphere(ensemble_g, params, num_actors, lamda_sphere):
             # print('delta_theta are', delta_theta)
             errors.append(torch.var(torch.stack(delta_theta)))
         grads = []
-        # print(ensemble_g)
-        # print('errors are', errors)
-        # exit(0)
-        sum_error = torch.sum(torch.stack(errors))
+        # sum_error = torch.sum(torch.stack(errors))
+
         for index_actor in range(num_actors):
             new_g = ensemble_g.clone().detach()
             # for i in range(num_actors):
-            tmp_grad, _ = flat_grad(sum_error, params_list[index_actor], retain_graph=True)
+            tmp_grad, _ = flat_grad(errors[index_actor], params_list[index_actor], retain_graph=True)
             new_g = new_g - lamda_sphere * tmp_grad
-            # print('new_g is ', new_g)
-            # print('tmp_grad is ', lamda_sphere * tmp_grad, tmp_grad)
-            # time_2 = time.time()
-            # time_interval = time_2 - time_1
-            # print('the spend time is ', time_interval)
             grads.append(-new_g)
-    # time_2 = time.time()
-    # time_interval = time_2 - time_1
-    # print('the spend time is ', time_interval)
     return grads
 
 
@@ -401,7 +397,10 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
     # print('alphas are ', alphas)
     small_distance = False
     if to_sphere:
-        grads = regular_same_sphere(part_g, params, num_actors, 0.1)
+        # grads = []
+        # for index_actor in range(num_actors):
+        #     grads.append(-part_g * alphas[index_actor])
+        grads = regular_same_sphere(part_g, params, num_actors, 0.01)
     else:
         params = torch.stack(params)
         param_average = torch.mean(params, dim=0)
@@ -741,12 +740,9 @@ def eg(env_fn,
         pi_loss = -torch.mean(q_pi)
         # print('pi_loss is ', pi_loss)
         if torch.isnan(pi_loss):
-            for index, one_actor in enumerate(actor.net_list):
-                parameters = list(one_actor.parameters())
-                print(index, parameters)
-            for index, one_actor in enumerate(critic1.net_list):
-                parameters = list(one_actor.parameters())
-                print(index, parameters)
+            # for index, one_actor in enumerate(actor.net_list):
+            #     parameters = list(one_actor.parameters())
+            #     print(index, parameters)
             exit(0)
         # print('pi_loss is ', pi_loss)
         # Critic update.

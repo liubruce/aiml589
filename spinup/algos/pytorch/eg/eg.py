@@ -452,7 +452,7 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
         # grads = []
         # for index_actor in range(num_actors):
         #     grads.append(-part_g * alphas[index_actor])
-        grads = regular_same_sphere_v2(part_g, params, num_actors, 0.01)
+        grads = regular_same_sphere_v2(part_g, params, num_actors, 0.1)
     else:
         params = torch.stack(params)
         param_average = torch.mean(params, dim=0)
@@ -970,6 +970,6 @@ def eg(env_fn,
 
             iter_time = time.time()
         # Save model
-        # if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
-        #     if save_path is not None:
-        #         torch.save(actor.state_dict(), save_path)
+        if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
+            if save_path is not None:
+                torch.save(actor.state_dict(), save_path)

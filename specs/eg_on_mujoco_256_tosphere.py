@@ -11,7 +11,7 @@ base_config = {
     'ac_number': 5,
     'lamda_value': 0.00001,
     'ac_kwargs': {
-        'hidden_sizes': [64, 64],
+        'hidden_sizes': [256, 256],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },

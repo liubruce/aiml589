@@ -358,6 +358,58 @@ def regular_small_distance(ensemble_g, lamda_value, params, current_index, index
         print('ensemble_g is ', tmp_grad,ensemble_g)
     return ensemble_g
 
+def cal_gradient_by_sphere(params,x):
+    num_len = len(params)
+    norm_grad = 0
+    for i in range(num_len):
+        if i == 0:
+            norm_grad = 2 *(params[i]-x)
+        else:
+            norm_grad += 2 * (params[i] - x)
+    norm_param = 0
+    for i in range(num_len):
+        if i == 0:
+            norm_param = -1 *(params[i]-x)**2
+        else:
+            norm_param += - (params[i]-x)**2
+    grad_vector = 0
+    for i in range(num_len):
+        if i == 0:
+            grad_vector = 2 * (-2 * (params[i] - x) + 1 / num_len * norm_grad) * ((params[i] - x)**2 + 1/num_len * norm_param)
+        else:
+            grad_vector += 2 * (-2 * (params[i] - x) + 1 / num_len * norm_grad) * ((params[i] - x)**2 + 1/num_len * norm_param)
+
+    grad_vector = 1/num_len * grad_vector
+    return grad_vector
+
+
+def regular_same_sphere_v2(ensemble_g, params, num_actors, lamda_sphere):
+    # lamda_value = 0.000001 #0.0000001
+    # time_1 = time.time()
+    # params_list = []
+    # for index_actor in range(num_actors):
+    #     params_list.append(params[index_actor].clone().detach().requires_grad_(True))
+    # distances = cal_distance_torch(params)
+    # errors = []
+    # for index_actor in range(num_actors):
+    #     delta_theta = []
+    #     for i in range(num_actors):
+    #         if i != index_actor:
+    #             delta_theta.append(distances[i][index_actor] if index_actor > i else distances[index_actor][i])
+    #     # print('delta_theta are', delta_theta)
+    #     errors.append(torch.var(torch.stack(delta_theta)))
+    grads = []
+    # sum_error = torch.sum(torch.stack(errors))
+    for index_actor in range(num_actors):
+        new_g = ensemble_g.clone().detach()
+        other_params = []
+        for i in range(num_actors):
+            if i != index_actor:
+                other_params.append(params[i])
+        tmp_grad = cal_gradient_by_sphere(other_params,params[index_actor])
+        new_g = new_g - lamda_sphere * tmp_grad
+        grads.append(-new_g)
+    return grads
 
 def regular_same_sphere(ensemble_g, params, num_actors, lamda_sphere):
     # lamda_value = 0.000001 #0.0000001
@@ -400,7 +452,7 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
         # grads = []
         # for index_actor in range(num_actors):
         #     grads.append(-part_g * alphas[index_actor])
-        grads = regular_same_sphere(part_g, params, num_actors, 0.01)
+        grads = regular_same_sphere_v2(part_g, params, num_actors, 0.01)
     else:
         params = torch.stack(params)
         param_average = torch.mean(params, dim=0)

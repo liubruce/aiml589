@@ -17,6 +17,7 @@ base_config = {
     },
     'save_freq': 1_000_000,
     'to_sphere': True,
+    'lamda_sphere': 1,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
         'exp_name': 'eg_64_sphere_3'

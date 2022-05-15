@@ -439,7 +439,7 @@ def regular_same_sphere(ensemble_g, params, num_actors, lamda_sphere):
     return grads
 
 
-def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant, lamda_value, to_sphere=True):
+def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant, lamda_value, to_sphere=True, lamda_sphere=0.1):
     for index in range(len(grad_flattened)):
         grad_flattened[index] = -grad_flattened[index]
     params = []
@@ -452,7 +452,7 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
         # grads = []
         # for index_actor in range(num_actors):
         #     grads.append(-part_g * alphas[index_actor])
-        grads = regular_same_sphere_v2(part_g, params, num_actors, 0.1)
+        grads = regular_same_sphere_v2(part_g, params, num_actors, lamda_sphere)
     else:
         params = torch.stack(params)
         param_average = torch.mean(params, dim=0)
@@ -477,7 +477,7 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
     return grads, small_distance
 
 
-def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, new_method=METHOD_EG, to_sphere = False): #  k_vector, m_n_matrix
+def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, new_method=METHOD_EG, to_sphere = False, lamda_sphere=0.1): #  k_vector, m_n_matrix
     # distances = cal_distance(param_list)
     # print(distances)
     small_distance = False
@@ -489,10 +489,10 @@ def layer_compute_g(actors, sizes, grad_flattened, param_list, lr, lamda_value, 
         grad_flattened = av_gradients(grad_flattened, num_actors)
 
     if new_method == METHOD_ALPHA_CONSTANT:
-        grad_flattened, small_distance = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True, lamda_value, to_sphere)
+        grad_flattened, small_distance = wholly_compute_g(grad_flattened, param_list, lr, num_actors, True, lamda_value, to_sphere, lamda_sphere)
 
     if new_method == METHOD_EG:
-        grad_flattened, small_distance = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False, lamda_value, to_sphere)
+        grad_flattened, small_distance = wholly_compute_g(grad_flattened, param_list, lr, num_actors, False, lamda_value, to_sphere, lamda_sphere)
         new_method = METHOD_ALPHA_CONSTANT
 
     for j in range(len(sizes) - 1):
@@ -557,7 +557,8 @@ def eg(env_fn,
         gradient_method= METHOD_ALPHA_CONSTANT,
         lamda_value=0.000001,
         init_sigma=0.01,
-        to_sphere=False
+        to_sphere=False,
+        lamda_sphere=0.1
         ):
     """Ensemble Deep Deterministic Policy Gradients.
 
@@ -781,7 +782,7 @@ def eg(env_fn,
             m_n_matrix.append(g)
         # m_n_matrix = torch.stack(m_n_matrix)
         # param_list = torch.stack(param_list)
-        return layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, lamda_value, gradient_method, to_sphere)
+        return layer_compute_g(actor, pi_sizes, m_n_matrix, param_list, lr, lamda_value, gradient_method, to_sphere, lamda_sphere)
         # exit(0)
 
 

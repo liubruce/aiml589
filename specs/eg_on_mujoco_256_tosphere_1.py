@@ -10,7 +10,6 @@ base_config = {
     # 'log_every': 1100,
     'ac_number': 5,
     'lamda_value': 0.00001,
-    'start_steps': 100_000,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',

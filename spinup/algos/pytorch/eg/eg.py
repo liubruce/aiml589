@@ -771,6 +771,8 @@ def eg(env_fn,
         # return np.clip(a, -act_limit, act_limit)
 
 
+    # Set up model saving
+    logger.setup_pytorch_saver(actor)
 
     def update_pi(loss):
         m_n_matrix = []
@@ -972,5 +974,6 @@ def eg(env_fn,
             iter_time = time.time()
         # Save model
         if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
-            if save_path is not None:
-                torch.save(actor.state_dict(), save_path)
+            logger.save_state({'env': env}, None)
+            # if save_path is not None:
+            #     torch.save(actor.state_dict(), save_path + f'/{time.time():.0f}')

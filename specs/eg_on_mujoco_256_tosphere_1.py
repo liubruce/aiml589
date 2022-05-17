@@ -8,8 +8,9 @@ base_config = {
     # 'log_every': 200,
     # 'train_intensity': 0.2,
     # 'log_every': 1100,
-    'ac_number': 3,
+    'ac_number': 5,
     'lamda_value': 0.00001,
+    'start_steps': 100_000,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',
@@ -17,10 +18,10 @@ base_config = {
     },
     'save_freq': 1_000_000,
     'to_sphere': True,
-    'lamda_sphere': 0.5,
+    'lamda_sphere': 1,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_64_sphere_3'
+        'exp_name': 'eg_256_sphere_1'
     }
 }
 

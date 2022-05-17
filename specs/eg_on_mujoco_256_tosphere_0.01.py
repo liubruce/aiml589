@@ -8,7 +8,7 @@ base_config = {
     # 'log_every': 200,
     # 'train_intensity': 0.2,
     # 'log_every': 1100,
-    'ac_number': 2,
+    'ac_number': 5,
     'lamda_value': 0.00001,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
@@ -20,7 +20,7 @@ base_config = {
     'lamda_sphere': 0.01,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_64_sphere_3'
+        'exp_name': 'eg_256_sphere_0.01'
     }
 }
 

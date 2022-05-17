@@ -108,8 +108,8 @@ class EnsembleActor(nn.Module):
         self.net_list = nn.ModuleList(
             [MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit, act_noise) for _ in range(ac_number)])
         # init_weights(self.net_list, act_noise, False)
-        for index, actor in enumerate(self.net_list):
-            actor.apply(init_weights)
+        # for index, actor in enumerate(self.net_list):
+        #     actor.apply(init_weights)
             # print('The ' + str(index) + ' actor!!')
             # for p in actor.parameters():
             #     print(p)

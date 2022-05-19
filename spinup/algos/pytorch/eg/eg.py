@@ -734,17 +734,17 @@ def eg(env_fn,
         obs_actor = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
         obs_critic = np.broadcast_to(obs, [ac_number, ac_number, *obs.shape])
 
-        mu, _ = actor(obs_actor)
+        mu, _ = actor(torch.from_numpy(obs_actor).float())
         # One action per batch.
         act = torch.reshape(mu, [1, ac_number, *mu.shape[2:]])
         # The same action for each component.
-        act = np.broadcast_to(act, [ac_number, ac_number, *mu.shape[2:]])
+        act = torch.broadcast_to(act, [ac_number, ac_number, *mu.shape[2:]])
         # Evaluate each action by all components.
-        qs = critic1([obs_critic, act])
+        qs = critic1(torch.from_numpy(obs_critic).float(), act)
         # Average over ensemble.
         qs = torch.mean(qs, dim=0)
 
-        return mu[torch.argmax(qs)][0]
+        return mu[torch.argmax(qs)][0].detach().numpy()
 
     def mean_evaluation_policy(obs):
         obs_actor = np.broadcast_to(obs, [ac_number, 1, *obs.shape])

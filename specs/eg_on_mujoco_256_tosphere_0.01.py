@@ -1,6 +1,6 @@
 base_config = {
     'agent': '@spinup.algos.pytorch.EG',
-    'total_steps': 3_000_000,
+    'total_steps': 1_000_000,
     'num_test_episodes': 30,
     'use_noise_for_exploration': False,
     # 'update_every': 50,

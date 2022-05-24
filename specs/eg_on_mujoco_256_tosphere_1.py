@@ -1,6 +1,6 @@
 base_config = {
     'agent': '@spinup.algos.pytorch.EG',
-    'total_steps': 3_000_000,
+    'total_steps': 1_000_000,
     'num_test_episodes': 30,
     'use_noise_for_exploration': False,
     # 'update_every': 50,
@@ -18,6 +18,7 @@ base_config = {
     'save_freq': 1_000_000,
     'to_sphere': True,
     'lamda_sphere': 1,
+    'use_vote_policy': False,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
         'exp_name': 'eg_256_sphere_1'

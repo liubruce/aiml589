@@ -21,7 +21,7 @@ base_config = {
     'use_vote_policy': False,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_256_sphere_1'
+        'exp_name': 'peg_256_sphere_1'
     }
 }
 

@@ -20,7 +20,7 @@ base_config = {
     'lamda_sphere': 0.01,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'eg_256_sphere_0.01'
+        'exp_name': 'peg_256_sphere_0.01'
     }
 }
 

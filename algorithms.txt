@@ -1,6 +1,12 @@
-eg_on_mujoco_256_000001
+eg_on_mujoco_256_01
+eg_on_mujoco_256_001
+eg_on_mujoco_256_0001
 eg_on_mujoco_256_00001
-eg_on_mujoco_256_tosphere_1
+eg_on_mujoco_256_000001
 eg_on_mujoco_256_tosphere_0.1
+eg_on_mujoco_256_tosphere_0.01
+eg_on_mujoco_256_tosphere_0.5
+eg_on_mujoco_256_tosphere_1
+
 
 

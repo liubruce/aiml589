@@ -7,6 +7,3 @@ eg_on_mujoco_256_tosphere_0.1
 eg_on_mujoco_256_tosphere_0.01
 eg_on_mujoco_256_tosphere_0.5
 eg_on_mujoco_256_tosphere_1
-
-
-

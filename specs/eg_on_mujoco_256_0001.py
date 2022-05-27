@@ -15,7 +15,7 @@ base_config = {
         'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
-'use_vote_policy': False,
+    'use_vote_policy': True,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
         'exp_name': 'peg_256_0001_noise'

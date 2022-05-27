@@ -17,7 +17,7 @@ base_config = {
     },
     'save_freq': 1_000_000,
     'to_sphere': True,
-    'use_vote_policy': False,
+    'use_vote_policy': True,
     'lamda_sphere': 0.5,
     'save_path': './out/checkpoint',
     'logger_kwargs': {

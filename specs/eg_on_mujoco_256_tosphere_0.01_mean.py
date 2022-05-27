@@ -8,18 +8,20 @@ base_config = {
     # 'log_every': 200,
     # 'train_intensity': 0.2,
     # 'log_every': 1100,
-    'lamda_value': 0.0001,
-    'init_sigma': 0.002,
+    'ac_number': 5,
+    'lamda_value': 0.00001,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
+    'to_sphere': True,
     'use_vote_policy': False,
+    'lamda_sphere': 0.01,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'peg_256_0001_002'
+        'exp_name': 'peg_256_sphere_0.01_noise_mean'
     }
 }
 

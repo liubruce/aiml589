@@ -2,7 +2,7 @@ base_config = {
     'agent': '@spinup.algos.pytorch.EG',
     'total_steps': 1_000_000,
     'num_test_episodes': 30,
-    'use_noise_for_exploration': False,
+    'use_noise_for_exploration': True,
     # 'update_every': 50,
     # 'update_after': 100,
     # 'log_every': 200,
@@ -18,9 +18,10 @@ base_config = {
     'save_freq': 1_000_000,
     'to_sphere': True,
     'lamda_sphere': 0.1,
+    'use_vote_policy': False,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'peg_256_sphere_0.1'
+        'exp_name': 'peg_256_sphere_0.1_noise'
     }
 }
 

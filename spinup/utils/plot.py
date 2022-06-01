@@ -34,7 +34,9 @@ def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1",
     # sns.tsplot(data=data, time=xaxis, value=value, unit="Unit", condition=condition, ci='sd', **kwargs)
     del kwargs["select_by_steps"]
     del kwargs["max_steps"]
-    sns.lineplot(data=data, x=xaxis, y=value, hue=condition, ci='sd', **kwargs)
+    title = kwargs["title"]
+    del kwargs["title"]
+    sns.lineplot(data=data, x=xaxis, y=value, hue=condition, ci='sd', **kwargs).set(title=title)
     """
     If you upgrade to any version of Seaborn greater than 0.8.1, switch from 
     tsplot to lineplot replacing L29 with:
@@ -93,7 +95,6 @@ def get_datasets(logdir, condition=None, select_by_steps=False, max_steps=300000
             try:
                 exp_data = pd.read_table(os.path.join(root,'progress.txt'))
                 if select_by_steps:
-                    print('select by steps is ', select_by_steps, max_steps)
                     exp_data = exp_data[exp_data['TotalEnvInteracts'] < max_steps]
 
             except BaseException as err:
@@ -161,14 +162,16 @@ def get_all_datasets(all_logdirs, legend=None, select=None, exclude=None, select
 
 
 def make_plots(all_logdirs, legend=None, xaxis=None, values=None, count=False,  
-               font_scale=1.5, smooth=1, select=None, exclude=None, estimator='mean', select_by_steps=False, max_steps=3000000):
+               font_scale=1.5, smooth=1, select=None, exclude=None, estimator='mean',
+               select_by_steps=False, max_steps=3000000, title=''):
     data = get_all_datasets(all_logdirs, legend, select, exclude, select_by_steps=select_by_steps, max_steps=max_steps)
     values = values if isinstance(values, list) else [values]
     condition = 'Condition2' if count else 'Condition1'
     estimator = getattr(np, estimator)      # choose what to show on main curve: mean? max? min?
     for value in values:
         plt.figure()
-        plot_data(data, xaxis=xaxis, value=value, condition=condition, smooth=smooth, estimator=estimator, select_by_steps=select_by_steps, max_steps=max_steps)
+        plot_data(data, xaxis=xaxis, value=value, condition=condition, smooth=smooth, estimator=estimator,
+                  select_by_steps=select_by_steps, max_steps=max_steps, title=title)
     plt.show()
 
 
@@ -184,6 +187,7 @@ def main():
     parser.add_argument('--select', nargs='*')
     parser.add_argument('--exclude', nargs='*')
     parser.add_argument('--est', default='mean')
+    parser.add_argument('--title', default='')
     parser.add_argument('--select_by_steps', default=False)
     parser.add_argument('--max_steps', default=3000000)
     args = parser.parse_args()
@@ -239,7 +243,8 @@ def main():
     # print(bool(distutils.util.strtobool(args.select_by_steps)), args.select_by_steps)
     make_plots(args.logdir, args.legend, args.xaxis, args.value, args.count, 
                smooth=args.smooth, select=args.select, exclude=args.exclude,
-               estimator=args.est, select_by_steps=eval(args.select_by_steps), max_steps=int(args.max_steps))
+               estimator=args.est, select_by_steps=eval(args.select_by_steps),
+               max_steps=int(args.max_steps), title=args.title)
 
 if __name__ == "__main__":
     main()

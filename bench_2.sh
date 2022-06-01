@@ -15,12 +15,6 @@
 #
 # Check we have somewhere to work now and if we don't, exit nicely.
 #
-#
-# Mail me at the b(eginning) and e(nd) of the job
-#
-#$ -M brucelgq.liu@gmail.com
-#$ -m be
-#
 if [ -d /local/tmp/liuguoq/$JOB_ID.$SGE_TASK_ID ]; then
         cd /local/tmp/liuguoq/$JOB_ID.$SGE_TASK_ID
 else

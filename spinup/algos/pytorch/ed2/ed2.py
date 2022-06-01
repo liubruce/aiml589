@@ -328,6 +328,8 @@ def ed2(env_fn,
         else:
             return mu[ac_idx, 0].detach().numpy()
 
+    # Set up model saving
+    logger.setup_pytorch_saver(actor)
 
     def learn_on_batch(obs1, obs2, acts, rews, done):
         mu, _ = actor(obs1)
@@ -499,5 +501,5 @@ def ed2(env_fn,
             iter_time = time.time()
         # Save model
         if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
-            if save_path is not None:
-                torch.save(actor.state_dict(), save_path)
+            if ((t + 1) % save_freq == 0) or (t + 1 == total_steps):
+                logger.save_state({'env': env}, None)

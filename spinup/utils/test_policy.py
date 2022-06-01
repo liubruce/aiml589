@@ -6,9 +6,9 @@ import tensorflow as tf
 import torch
 from spinup.utils.logx import EpochLogger
 from spinup.utils.logx import restore_tf_graph
+import numpy as np
 
-
-def load_policy_and_env(fpath, itr='last', deterministic=False):
+def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False):
     """
     Load a policy from save, whether it's TF or PyTorch, along with RL env.
 
@@ -21,7 +21,7 @@ def load_policy_and_env(fpath, itr='last', deterministic=False):
     """
 
     # determine if tf save or pytorch save
-    if any(['tf1_save' in x for x in os.listdir(fpath)]):
+    if any(['checkpoint' in x for x in os.listdir(fpath)]):
         backend = 'tf1'
     else:
         backend = 'pytorch'
@@ -48,10 +48,11 @@ def load_policy_and_env(fpath, itr='last', deterministic=False):
         itr = '%d' % itr
 
     # load the get_action function
+    print('backend is ', backend)
     if backend == 'tf1':
-        get_action = load_tf_policy(fpath, itr, deterministic)
+        get_action = load_tf_policy(fpath, itr, deterministic, ensemble)
     else:
-        get_action = load_pytorch_policy(fpath, itr, deterministic)
+        get_action = load_pytorch_policy(fpath, itr, deterministic, ensemble)
 
     # try to load environment from save
     # (sometimes this will fail because the environment could not be pickled)
@@ -64,44 +65,59 @@ def load_policy_and_env(fpath, itr='last', deterministic=False):
     return env, get_action
 
 
-def load_tf_policy(fpath, itr, deterministic=False):
+def load_tf_policy(fpath, itr, deterministic=False, ensemble=False):
     """ Load a tensorflow policy saved with Spinning Up Logger."""
-
-    fname = osp.join(fpath, 'tf1_save' + itr)
+    print('fpath is ', fpath, itr)
+    fname = osp.join(fpath, 'checkpoint' + itr)
     print('\n\nLoading from %s.\n\n' % fname)
 
     # load the things!
-    sess = tf.Session()
-    model = restore_tf_graph(sess, fname)
+    # sess = tf.Session()
+    model = tf.keras.models.load_model(fname)
+    # model = restore_tf_graph(sess, fname)
 
     # get the correct op for executing actions
-    if deterministic and 'mu' in model.keys():
-        # 'deterministic' is only a valid option for SAC policies
-        print('Using deterministic action op.')
-        action_op = model['mu']
-    else:
-        print('Using default action op.')
-        action_op = model['pi']
+    # if deterministic and 'mu' in model.keys():
+    #     # 'deterministic' is only a valid option for SAC policies
+    #     print('Using deterministic action op.')
+    #     action_op = model['mu']
+    # else:
+    #     print('Using default action op.')
+    #     action_op = model['pi']
 
-    # make function for producing an action given a single state
-    get_action = lambda x: sess.run(action_op, feed_dict={model['x']: x[None, :]})[0]
+    def get_action(x):
+        obs = x
+        obs_actor = tf.broadcast_to(obs, [5, 1, *obs.shape])
+        mu, _ = model(obs_actor)
+        return tf.reduce_mean(mu, axis=0)[0]
 
     return get_action
 
 
-def load_pytorch_policy(fpath, itr, deterministic=False):
+def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False):
     """ Load a pytorch policy saved with Spinning Up Logger."""
 
     fname = osp.join(fpath, 'pyt_save', 'model' + itr + '.pt')
     print('\n\nLoading from %s.\n\n' % fname)
-
+    print('fname is ', fname)
     model = torch.load(fname)
-
+    print('deterministic is', deterministic, ensemble)
     # make function for producing an action given a single state
     def get_action(x):
         with torch.no_grad():
-            x = torch.as_tensor(x, dtype=torch.float32)
-            action = model.act(x)
+            if ensemble:
+                obs = x
+                ac_number = 5
+                obs_actor = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
+                # print('The shape of obs_actor is ', obs_actor.shape)
+                mu, _ = model(torch.from_numpy(obs_actor).float())
+                action = torch.mean(mu, dim=0)[0].detach().numpy()
+            else:
+                x = torch.as_tensor(x, dtype=torch.float32)
+                action = model.act(x)
+        # return action
+            # x = torch.as_tensor(x, dtype=torch.float32)
+            # action = model.net_list[0](x)
         return action
 
     return get_action
@@ -146,8 +162,10 @@ if __name__ == '__main__':
     parser.add_argument('--norender', '-nr', action='store_true')
     parser.add_argument('--itr', '-i', type=int, default=-1)
     parser.add_argument('--deterministic', '-d', action='store_true')
+    parser.add_argument('--ensemble', '-e', default='False')
     args = parser.parse_args()
+    print('args.ensemble is ', args.ensemble)
     env, get_action = load_policy_and_env(args.fpath,
                                           args.itr if args.itr >= 0 else 'last',
-                                          args.deterministic)
+                                          args.deterministic, eval(args.ensemble))
     run_policy(env, get_action, args.len, args.episodes, not (args.norender))

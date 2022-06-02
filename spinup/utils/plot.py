@@ -247,7 +247,6 @@ def main():
         for index, dir in enumerate(args.logdir):
             if index == 0:
                 for sub_dir in list(Path(dir).rglob(args.rglob)):
-                    print('sub_dir is ', sub_dir)
                     new_dir.append(str(sub_dir))
             else:
                 new_dir.append(dir)

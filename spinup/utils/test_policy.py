@@ -111,7 +111,11 @@ def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False):
                 obs_actor = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
                 # print('The shape of obs_actor is ', obs_actor.shape)
                 mu, _ = model(torch.from_numpy(obs_actor).float())
-                action = torch.mean(mu, dim=0)[0].detach().numpy()
+                # print('mu is ', mu.shape)
+                # print(torch.mean(mu, dim=0)[0].detach().numpy().shape)
+                # exit(0)
+                action = mu[0][0].detach().numpy()
+                # torch.mean(mu, dim=0)[0].detach().numpy()
             else:
                 x = torch.as_tensor(x, dtype=torch.float32)
                 action = model.act(x)

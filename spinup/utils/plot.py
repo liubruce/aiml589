@@ -5,7 +5,7 @@ import json
 import os
 import os.path as osp
 import numpy as np
-
+from pathlib import Path
 
 DIV_LINE_WIDTH = 50
 
@@ -190,6 +190,7 @@ def main():
     parser.add_argument('--title', default='')
     parser.add_argument('--select_by_steps', default='False')
     parser.add_argument('--max_steps', default=3000000)
+    parser.add_argument('--rglob', default='')
     args = parser.parse_args()
     print('args', args)
     """
@@ -240,8 +241,21 @@ def main():
             curves from logdirs that do not contain these substrings.
 
     """
+
+    new_dir = []
+    if args.rglob != '':
+        for index, dir in enumerate(args.logdir):
+            if index == 0:
+                for sub_dir in list(Path(dir).rglob(args.rglob)):
+                    print('sub_dir is ', sub_dir)
+                    new_dir.append(str(sub_dir))
+            else:
+                new_dir.append(dir)
+    else:
+        new_dir = args.logdir
+
     # print(bool(distutils.util.strtobool(args.select_by_steps)), args.select_by_steps)
-    make_plots(args.logdir, args.legend, args.xaxis, args.value, args.count, 
+    make_plots(new_dir, args.legend, args.xaxis, args.value, args.count,
                smooth=args.smooth, select=args.select, exclude=args.exclude,
                estimator=args.est, select_by_steps=eval(args.select_by_steps),
                max_steps=int(args.max_steps), title=args.title)

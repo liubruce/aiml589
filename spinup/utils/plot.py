@@ -188,7 +188,7 @@ def main():
     parser.add_argument('--exclude', nargs='*')
     parser.add_argument('--est', default='mean')
     parser.add_argument('--title', default='')
-    parser.add_argument('--select_by_steps', default=False)
+    parser.add_argument('--select_by_steps', default='False')
     parser.add_argument('--max_steps', default=3000000)
     args = parser.parse_args()
     print('args', args)

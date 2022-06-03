@@ -7,8 +7,9 @@ import torch
 from spinup.utils.logx import EpochLogger
 from spinup.utils.logx import restore_tf_graph
 import numpy as np
+import sys
 
-def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False):
+def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False,ac_number=5, ac_index = 0):
     """
     Load a policy from save, whether it's TF or PyTorch, along with RL env.
 
@@ -48,11 +49,11 @@ def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False):
         itr = '%d' % itr
 
     # load the get_action function
-    print('backend is ', backend)
+    # print('backend is ', backend)
     if backend == 'tf1':
         get_action = load_tf_policy(fpath, itr, deterministic, ensemble)
     else:
-        get_action = load_pytorch_policy(fpath, itr, deterministic, ensemble)
+        get_action = load_pytorch_policy(fpath, itr, deterministic, ensemble, ac_number, ac_index)
 
     # try to load environment from save
     # (sometimes this will fail because the environment could not be pickled)
@@ -67,7 +68,6 @@ def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False):
 
 def load_tf_policy(fpath, itr, deterministic=False, ensemble=False):
     """ Load a tensorflow policy saved with Spinning Up Logger."""
-    print('fpath is ', fpath, itr)
     fname = osp.join(fpath, 'checkpoint' + itr)
     print('\n\nLoading from %s.\n\n' % fname)
 
@@ -94,27 +94,24 @@ def load_tf_policy(fpath, itr, deterministic=False, ensemble=False):
     return get_action
 
 
-def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False):
+def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False, ac_number=5, ac_index = 0):
     """ Load a pytorch policy saved with Spinning Up Logger."""
 
     fname = osp.join(fpath, 'pyt_save', 'model' + itr + '.pt')
     print('\n\nLoading from %s.\n\n' % fname)
-    print('fname is ', fname)
     model = torch.load(fname)
-    print('deterministic is', deterministic, ensemble)
     # make function for producing an action given a single state
     def get_action(x):
         with torch.no_grad():
             if ensemble:
                 obs = x
-                ac_number = 5
                 obs_actor = np.broadcast_to(obs, [ac_number, 1, *obs.shape])
                 # print('The shape of obs_actor is ', obs_actor.shape)
                 mu, _ = model(torch.from_numpy(obs_actor).float())
                 # print('mu is ', mu.shape)
                 # print(torch.mean(mu, dim=0)[0].detach().numpy().shape)
                 # exit(0)
-                action = mu[0][0].detach().numpy()
+                action = mu[ac_index][0].detach().numpy()
                 # torch.mean(mu, dim=0)[0].detach().numpy()
             else:
                 x = torch.as_tensor(x, dtype=torch.float32)
@@ -147,13 +144,13 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
 
         if d or (ep_len == max_ep_len):
             logger.store(EpRet=ep_ret, EpLen=ep_len)
-            print('Episode %d \t EpRet %.3f \t EpLen %d' % (n, ep_ret, ep_len))
+            # print('Episode %d \t EpRet %.3f \t EpLen %d' % (n, ep_ret, ep_len))
             o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
             n += 1
 
     logger.log_tabular('EpRet', with_min_and_max=True)
     logger.log_tabular('EpLen', average_only=True)
-    logger.dump_tabular()
+    logger.dump_tabular(save_to_file=False)
 
 
 if __name__ == '__main__':
@@ -167,9 +164,29 @@ if __name__ == '__main__':
     parser.add_argument('--itr', '-i', type=int, default=-1)
     parser.add_argument('--deterministic', '-d', action='store_true')
     parser.add_argument('--ensemble', '-e', default='False')
+    parser.add_argument('--ac_number', '-a', default=5)
     args = parser.parse_args()
-    print('args.ensemble is ', args.ensemble)
-    env, get_action = load_policy_and_env(args.fpath,
-                                          args.itr if args.itr >= 0 else 'last',
-                                          args.deterministic, eval(args.ensemble))
-    run_policy(env, get_action, args.len, args.episodes, not (args.norender))
+    args.ensemble = eval(args.ensemble)
+    # print('args.ensemble is ', args.ensemble)
+    if args.ensemble:
+        for i in range(int(args.ac_number)):
+            original_stdout = sys.stdout  # Save a reference to the original standard output
+            output_dir = f'./test_policy/{time.time():.0f}'
+            if osp.exists(output_dir):
+                print("Warning: Log dir %s already exists! Storing info there anyway."%output_dir)
+            else:
+                os.makedirs(output_dir)
+            with open(output_dir + '/test_results.txt', 'w') as f:
+                sys.stdout = f  # Change the standard output to the file we created.
+                print('The index of actor is ', i)
+                env, get_action = load_policy_and_env(args.fpath,
+                                                      args.itr if args.itr >= 0 else 'last',
+                                                      args.deterministic, args.ensemble, args.ac_number, i)
+                run_policy(env, get_action, args.len, args.episodes, not (args.norender))
+                sys.stdout = original_stdout  # Reset the standard output to its original value
+
+    else:
+        env, get_action = load_policy_and_env(args.fpath,
+                                              args.itr if args.itr >= 0 else 'last',
+                                              args.deterministic, args.ensemble)
+        run_policy(env, get_action, args.len, args.episodes, not (args.norender))

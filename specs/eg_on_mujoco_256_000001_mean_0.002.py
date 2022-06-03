@@ -9,16 +9,17 @@ base_config = {
     # 'train_intensity': 0.2,
     # 'log_every': 1100,
     'lamda_value': 0.000001,
+    'init_sigma': 0.002,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],
         # 'activation': 'relu',
         'prior_weight': 0.0
     },
     'save_freq': 1_000_000,
-'use_vote_policy': False,
+    'use_vote_policy': False,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'peg_distance_000001_noise_mean'
+        'exp_name': 'peg_distance_000001_noise_mean_0.002'
     }
 }
 

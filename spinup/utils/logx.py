@@ -245,7 +245,7 @@ class Logger:
                 torch.save(self.pytorch_saver_elements, fname)
 
 
-    def dump_tabular(self):
+    def dump_tabular(self, save_to_file=True):
         """
         Write all of the diagnostics from the current iteration.
 
@@ -265,7 +265,7 @@ class Logger:
                 print(fmt%(key, valstr))
                 vals.append(val)
             print("-"*n_slashes, flush=True)
-            if self.output_file is not None:
+            if save_to_file and self.output_file is not None:
                 if self.first_row:
                     self.output_file.write("\t".join(self.log_headers)+"\n")
                 self.output_file.write("\t".join(map(str,vals))+"\n")

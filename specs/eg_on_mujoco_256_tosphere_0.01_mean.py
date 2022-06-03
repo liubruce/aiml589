@@ -21,7 +21,7 @@ base_config = {
     'lamda_sphere': 0.01,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'peg_256_sphere_0.01_noise_mean'
+        'exp_name': 'peg_variance_0.01_noise_mean'
     }
 }
 

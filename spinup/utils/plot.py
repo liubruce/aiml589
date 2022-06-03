@@ -192,7 +192,12 @@ def main():
     parser.add_argument('--max_steps', default=3000000)
     parser.add_argument('--rglob', default='')
     args = parser.parse_args()
-    print('args', args)
+
+    # font = {'family': 'monospace',
+    #         'weight': 'bold',
+    #         'size': 20}
+    # plt.rc('font', **font)  # pass in the font dict as kwargs
+
     """
 
     Args: 

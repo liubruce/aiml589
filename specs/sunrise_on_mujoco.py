@@ -1,6 +1,6 @@
 base_config = {
     'agent': '@spinup.algos.tf2.SUNRISE',
-    'total_steps': 3000_000,
+    'total_steps': 1000_000,
     'num_test_episodes': 30,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],

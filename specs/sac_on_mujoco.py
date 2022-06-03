@@ -1,6 +1,6 @@
 base_config = {
     'agent': '@spinup.algos.pytorch.SAC',
-    'total_steps': 3_000_000,
+    'total_steps': 1_000_000,
     'num_test_episodes': 30,
     'ac_kwargs': {
         'hidden_sizes': [256, 256],

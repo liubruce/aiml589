@@ -23,7 +23,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('logdir', nargs='*')
-    parser.add_argument('--step', default=3000000)
+    parser.add_argument('--step', default=1000000)
     parser.add_argument('--col_name', default='AverageTestEpRet')
     args = parser.parse_args()
     """

@@ -169,21 +169,23 @@ if __name__ == '__main__':
     args.ensemble = eval(args.ensemble)
     # print('args.ensemble is ', args.ensemble)
     if args.ensemble:
-        for i in range(int(args.ac_number)):
+        output_dir = f'./test_policy/{time.time():.0f}'
+        if osp.exists(output_dir):
+            print("Warning: Log dir %s already exists! Storing info there anyway." % output_dir)
+        else:
+            os.makedirs(output_dir)
+        with open(output_dir + '/test_results.txt', 'w') as f:
             original_stdout = sys.stdout  # Save a reference to the original standard output
-            output_dir = f'./test_policy/{time.time():.0f}'
-            if osp.exists(output_dir):
-                print("Warning: Log dir %s already exists! Storing info there anyway."%output_dir)
-            else:
-                os.makedirs(output_dir)
-            with open(output_dir + '/test_results.txt', 'w') as f:
-                sys.stdout = f  # Change the standard output to the file we created.
+            sys.stdout = f  # Change the standard output to the file we created.
+
+            for i in range(int(args.ac_number)):
                 print('The index of actor is ', i)
                 env, get_action = load_policy_and_env(args.fpath,
                                                       args.itr if args.itr >= 0 else 'last',
                                                       args.deterministic, args.ensemble, args.ac_number, i)
                 run_policy(env, get_action, args.len, args.episodes, not (args.norender))
-                sys.stdout = original_stdout  # Reset the standard output to its original value
+
+            sys.stdout = original_stdout  # Reset the standard output to its original value
 
     else:
         env, get_action = load_policy_and_env(args.fpath,

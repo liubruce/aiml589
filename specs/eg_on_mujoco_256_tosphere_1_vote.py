@@ -21,7 +21,7 @@ base_config = {
     'use_vote_policy': True,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'peg_variance_1'
+        'exp_name': 'peg_variance_1_noise_vote'
     }
 }
 

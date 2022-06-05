@@ -19,7 +19,7 @@ base_config = {
     'use_vote_policy': False,
     'save_path': './out/checkpoint',
     'logger_kwargs': {
-        'exp_name': 'peg_distance_000001_noise_mean_0.002'
+        'exp_name': 'peg_distance_000001_0.002_noise_mean'
     }
 }
 

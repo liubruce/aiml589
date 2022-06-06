@@ -9,7 +9,7 @@ from spinup.utils.logx import restore_tf_graph
 import numpy as np
 import sys
 
-def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False,ac_number=5, ac_index = 0):
+def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False,ac_number=5, ac_index = 0, aggregate=False):
     """
     Load a policy from save, whether it's TF or PyTorch, along with RL env.
 
@@ -53,7 +53,7 @@ def load_policy_and_env(fpath, itr='last', deterministic=False, ensemble=False,a
     if backend == 'tf1':
         get_action = load_tf_policy(fpath, itr, deterministic, ensemble)
     else:
-        get_action = load_pytorch_policy(fpath, itr, deterministic, ensemble, ac_number, ac_index)
+        get_action = load_pytorch_policy(fpath, itr, deterministic, ensemble, ac_number, ac_index, aggregate)
 
     # try to load environment from save
     # (sometimes this will fail because the environment could not be pickled)
@@ -94,7 +94,7 @@ def load_tf_policy(fpath, itr, deterministic=False, ensemble=False):
     return get_action
 
 
-def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False, ac_number=5, ac_index = 0):
+def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False, ac_number=5, ac_index = 0, aggregate=False):
     """ Load a pytorch policy saved with Spinning Up Logger."""
 
     fname = osp.join(fpath, 'pyt_save', 'model' + itr + '.pt')
@@ -111,7 +111,10 @@ def load_pytorch_policy(fpath, itr, deterministic=False, ensemble= False, ac_num
                 # print('mu is ', mu.shape)
                 # print(torch.mean(mu, dim=0)[0].detach().numpy().shape)
                 # exit(0)
-                action = mu[ac_index][0].detach().numpy()
+                if aggregate:
+                    action = torch.mean(mu, dim=0)[0].detach().numpy()
+                else:
+                    action = mu[ac_index][0].detach().numpy()
                 # torch.mean(mu, dim=0)[0].detach().numpy()
             else:
                 x = torch.as_tensor(x, dtype=torch.float32)
@@ -165,8 +168,10 @@ if __name__ == '__main__':
     parser.add_argument('--deterministic', '-d', action='store_true')
     parser.add_argument('--ensemble', '-e', default='False')
     parser.add_argument('--ac_number', '-a', default=5)
+    # parser.add_argument('--aggregate', '-g', default='False')
     args = parser.parse_args()
     args.ensemble = eval(args.ensemble)
+    # args.aggregate = eval(args.aggregate)
     # print('args.ensemble is ', args.ensemble)
     if args.ensemble:
         output_dir = f'./test_policy/{time.time():.0f}'
@@ -177,13 +182,18 @@ if __name__ == '__main__':
         with open(output_dir + '/test_results.txt', 'w') as f:
             original_stdout = sys.stdout  # Save a reference to the original standard output
             sys.stdout = f  # Change the standard output to the file we created.
-
+            # action from each actor from the ensemble one by one.
             for i in range(int(args.ac_number)):
                 print('The index of actor is ', i)
                 env, get_action = load_policy_and_env(args.fpath,
                                                       args.itr if args.itr >= 0 else 'last',
                                                       args.deterministic, args.ensemble, args.ac_number, i)
                 run_policy(env, get_action, args.len, args.episodes, not (args.norender))
+            # action from the average action of multiple actors' outcome.
+            env, get_action = load_policy_and_env(args.fpath,
+                                                  args.itr if args.itr >= 0 else 'last',
+                                                  args.deterministic, args.ensemble, args.ac_number, 0, True)
+            run_policy(env, get_action, args.len, args.episodes, not (args.norender))
 
             sys.stdout = original_stdout  # Reset the standard output to its original value
 

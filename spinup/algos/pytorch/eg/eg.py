@@ -448,32 +448,40 @@ def wholly_compute_g(grad_flattened, param_list, lr, num_actors, alpha_constant,
     part_g, alphas = compute_ensemble_g(grad_flattened, params, lr, alpha_constant)
     # print('alphas are ', alphas)
     small_distance = False
-    if to_sphere:
-        # grads = []
-        # for index_actor in range(num_actors):
-        #     grads.append(-part_g * alphas[index_actor])
-        grads = regular_same_sphere_v2(part_g, params, num_actors, lamda_sphere)
-    else:
-        params = torch.stack(params)
-        param_average = torch.mean(params, dim=0)
+    if int(to_sphere) == 2:
         grads = []
-        # distances = cal_distance(params)
-        # print(distances)
-        dist_threshold = 1
-        dist_alpha = 0.5
         for index_actor in range(num_actors):
             if alpha_constant:
-                # ensemble_g = part_g
-                ensemble_g = regular_gradients(part_g, param_average, params[index_actor], lamda_value)
-                # for i in range(num_actors):
-                #     if i != index_actor:
-                #         current_distance = distances[i][index_actor] if index_actor > i else distances[index_actor][i]
-                #         if current_distance < dist_threshold:
-                #             small_distance = True
-                #             ensemble_g = regular_small_distance(ensemble_g, dist_alpha, params, index_actor, i)
-                grads.append(-ensemble_g)
+                grads.append(-part_g)
             else:
                 grads.append(-part_g * alphas[index_actor])
+    else:
+        if int(to_sphere) ==1:
+            # grads = []
+            # for index_actor in range(num_actors):
+            #     grads.append(-part_g * alphas[index_actor])
+            grads = regular_same_sphere_v2(part_g, params, num_actors, lamda_sphere)
+        else:
+            params = torch.stack(params)
+            param_average = torch.mean(params, dim=0)
+            grads = []
+            # distances = cal_distance(params)
+            # print(distances)
+            dist_threshold = 1
+            dist_alpha = 0.5
+            for index_actor in range(num_actors):
+                if alpha_constant:
+                    # ensemble_g = part_g
+                    ensemble_g = regular_gradients(part_g, param_average, params[index_actor], lamda_value)
+                    # for i in range(num_actors):
+                    #     if i != index_actor:
+                    #         current_distance = distances[i][index_actor] if index_actor > i else distances[index_actor][i]
+                    #         if current_distance < dist_threshold:
+                    #             small_distance = True
+                    #             ensemble_g = regular_small_distance(ensemble_g, dist_alpha, params, index_actor, i)
+                    grads.append(-ensemble_g)
+                else:
+                    grads.append(-part_g * alphas[index_actor])
     return grads, small_distance
 
 

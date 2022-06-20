@@ -1,4 +1,7 @@
+ed2_torch_on_mujoco
+ed2_torch_on_mujoco_sop
 peg_no_mean_no_default
 peg_no_mean_yes_default
 peg_no_vote_no_default
 peg_no_vote_yes_default
+

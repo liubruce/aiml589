@@ -16,7 +16,7 @@ base_config = {
     'to_sphere': 2,
     'lamda_sphere': 1,
     'logger_kwargs': {
-        'exp_name': 'peg_variance_vote_yes_default'
+        'exp_name': 'peg_no_vote_yes_default'
     }
 }
 

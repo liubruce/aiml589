@@ -1,10 +1,8 @@
 Hopper-v3
-Walker2d-v3
 Ant-v3
 Humanoid-v3
 HalfCheetah-v3
-Swimmer-v3
-InvertedDoublePendulum-v2
-Reacher-v2
-InvertedPendulum-v2
 HumanoidStandup-v2
+Reacher-v2
+Swimmer-v3
+Walker2d-v3

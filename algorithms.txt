@@ -1,7 +1,4 @@
-ed2_torch_on_mujoco
-ed2_torch_on_mujoco_sop
-peg
-sac_on_mujoco
-sunrise_on_mujoco
-td3_on_mujoco
-peg_distance
+peg_no_mean_no_default
+peg_no_mean_yes_default
+peg_no_vote_no_default
+peg_no_vote_yes_default
